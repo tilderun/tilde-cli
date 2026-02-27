@@ -1,0 +1,3439 @@
+openapi: 3.0.3
+info:
+  title: Cerebral API
+  description: Cloud data versioning service for heterogeneous sources.
+  version: 1.0.0
+  contact:
+    name: Cerebral
+servers:
+  - url: /api/v1
+
+security:
+  - BasicAuth: []
+  - BearerAuth: []
+
+paths:
+  # --- Auth ---
+  /auth/signup:
+    post:
+      tags: [Auth]
+      summary: Create a new user account
+      operationId: signup
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in with username/email and password
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login, password]
+              properties:
+                login:
+                  type: string
+                  description: Username or email address
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Login successful (sets session and CSRF cookies)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out (clears session cookies)
+      operationId: logout
+      responses:
+        '204':
+          description: Logged out
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current authenticated user and their organizations
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Current user with organization memberships
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, organizations]
+                additionalProperties: false
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  organizations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OrgSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/check-username:
+    get:
+      tags: [Auth]
+      summary: Check if a username is available
+      operationId: checkUsername
+      security: []
+      parameters:
+        - name: username
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Availability result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available]
+                additionalProperties: false
+                properties:
+                  available:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/search-users:
+    get:
+      tags: [Auth]
+      summary: Search users by username prefix
+      operationId: searchUsers
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Username prefix to search for
+      responses:
+        '200':
+          description: Matching users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                additionalProperties: false
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [username, full_name]
+                      additionalProperties: false
+                      properties:
+                        username:
+                          type: string
+                        full_name:
+                          type: string
+
+  /auth/emails:
+    post:
+      tags: [Auth]
+      summary: Add an email address to the current user
+      operationId: addEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '201':
+          description: Email added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserEmail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Auth]
+      summary: List email addresses for the current user
+      operationId: listEmails
+      responses:
+        '200':
+          description: Email list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UserEmail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/keys:
+    post:
+      tags: [Auth]
+      summary: Generate a new API key
+      operationId: createAPIKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  description: Human-readable name for the key
+                description:
+                  type: string
+      responses:
+        '201':
+          description: API token created (token shown only once)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APITokenCreated'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    get:
+      tags: [Auth]
+      summary: List API keys (no secrets)
+      operationId: listAPIKeys
+      responses:
+        '200':
+          description: API token list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/APIToken'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/keys/{key_id}:
+    delete:
+      tags: [Auth]
+      summary: Revoke an API key
+      operationId: revokeAPIKey
+      parameters:
+        - $ref: '#/components/parameters/KeyID'
+      responses:
+        '204':
+          description: Key revoked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- OAuth ---
+  /auth/oauth/providers:
+    get:
+      tags: [Auth]
+      summary: List enabled OAuth providers
+      operationId: oauthProviders
+      security: []
+      responses:
+        '200':
+          description: List of enabled provider names
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      type: string
+                      enum: [google, github]
+
+  /auth/oauth/{provider}/authorize:
+    get:
+      tags: [Auth]
+      summary: Start OAuth authorization flow
+      operationId: oauthAuthorize
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [google, github]
+      responses:
+        '302':
+          description: Redirect to OAuth provider
+          headers:
+            Location:
+              schema:
+                type: string
+
+  /auth/oauth/{provider}/callback:
+    get:
+      tags: [Auth]
+      summary: OAuth provider callback
+      operationId: oauthCallback
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [google, github]
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: error
+          in: query
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to UI (login page on error, home on success, register/complete for new users)
+          headers:
+            Location:
+              schema:
+                type: string
+
+  /auth/oauth/complete-registration:
+    post:
+      tags: [Auth]
+      summary: Complete OAuth registration with username
+      operationId: oauthCompleteRegistration
+      security: []
+      parameters:
+        - name: X-OAuth-Nonce
+          in: header
+          required: true
+          schema:
+            type: string
+          description: CSRF nonce matching the claim JWT's jti
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username:
+                  type: string
+                  pattern: '^[a-z0-9][a-z0-9_-]{1,38}$'
+                company:
+                  type: string
+                invite_code:
+                  type: string
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: Invalid nonce or invite code required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Username or email already taken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/oauth/claim-info:
+    get:
+      tags: [Auth]
+      summary: Get OAuth claim info from HttpOnly cookie
+      operationId: oauthClaimInfo
+      security: []
+      responses:
+        '200':
+          description: Claim info for the pending OAuth registration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  provider:
+                    type: string
+                  email:
+                    type: string
+                  name:
+                    type: string
+        '401':
+          description: No valid OAuth claim cookie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # --- Cross-org repositories ---
+  /repositories:
+    get:
+      tags: [Repositories]
+      summary: List all repositories the user has access to across organizations
+      operationId: listAllUserRepos
+      responses:
+        '200':
+          description: Repository list with organization context
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RepositoryWithOrg'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # --- Organizations ---
+  /organizations:
+    post:
+      tags: [Organizations]
+      summary: Create an organization
+      operationId: createOrg
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrgRequest'
+      responses:
+        '201':
+          description: Organization created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Organizations]
+      summary: List user's organizations
+      operationId: listOrgs
+      responses:
+        '200':
+          description: Org list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Organization'
+
+  /organizations/{organization}:
+    get:
+      tags: [Organizations]
+      summary: Get organization details
+      operationId: getOrg
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      responses:
+        '200':
+          description: Organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/members:
+    get:
+      tags: [Organizations]
+      summary: List organization members
+      operationId: listMembers
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      responses:
+        '200':
+          description: Member list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Membership'
+    post:
+      tags: [Organizations]
+      summary: Add a member to the organization
+      operationId: addMember
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMemberRequest'
+      responses:
+        '201':
+          description: Member added
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organization}/members/{user_id}:
+    delete:
+      tags: [Organizations]
+      summary: Remove a member from the organization
+      operationId: removeMember
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Member removed
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Repositories ---
+  /organizations/{organization}/repositories:
+    post:
+      tags: [Repositories]
+      summary: Create a repository
+      operationId: createRepository
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRepositoryRequest'
+      responses:
+        '201':
+          description: Repository created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Repository'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    get:
+      tags: [Repositories]
+      summary: List repositories
+      operationId: listRepositories
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Amount'
+      responses:
+        '200':
+          description: Repository list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Repository'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /organizations/{organization}/repositories/{repository}:
+    get:
+      tags: [Repositories]
+      summary: Get repository details
+      operationId: getRepository
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+      responses:
+        '200':
+          description: Repository
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Repository'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Repositories]
+      summary: Update a repository's settings
+      operationId: updateRepository
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                visibility:
+                  type: string
+                  enum: [private, public]
+                agents_require_approval:
+                  type: boolean
+                session_max_duration_days:
+                  type: integer
+                  description: Maximum number of days a session can remain open before cleanup. Must be less than retention_days.
+                retention_days:
+                  type: integer
+                  description: Number of days of commit history to retain. Must be greater than session_max_duration_days.
+      responses:
+        '200':
+          description: Updated repository
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Repository'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags: [Repositories]
+      summary: Delete a repository (soft delete)
+      operationId: deleteRepository
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+      responses:
+        '204':
+          description: Repository deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Sessions ---
+  /organizations/{organization}/repositories/{repository}/sessions:
+    post:
+      tags: [Sessions]
+      summary: Create a new editing session
+      operationId: createSession
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSessionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /organizations/{organization}/repositories/{repository}/sessions/{session_id}:
+    post:
+      tags: [Sessions]
+      summary: Commit a session (applies staged changes)
+      operationId: commitSession
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SessionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitSessionRequest'
+      responses:
+        '200':
+          description: Session committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitSessionResponse'
+        '202':
+          description: Approval required (agents_require_approval is enabled and caller is an agent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRequiredResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Sessions]
+      summary: Rollback a session (discard all staged changes)
+      operationId: rollbackSession
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '204':
+          description: Session rolled back
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/repositories/{repository}/sessions/{session_id}/approve:
+    head:
+      tags: [Sessions]
+      summary: Check if a session is still pending approval
+      description: >
+        Lightweight polling endpoint for agents waiting on approval.
+        Returns 200 if the session is still pending approval, 404 if
+        it has been committed or rolled back.
+      operationId: headSessionApproval
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SessionID'
+      responses:
+        '200':
+          description: Session is still pending approval
+        '404':
+          description: Session has been committed or rolled back
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    get:
+      tags: [Sessions]
+      summary: Review session changes (for approval)
+      operationId: getSessionChanges
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SessionID'
+        - $ref: '#/components/parameters/Prefix'
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Amount'
+      responses:
+        '200':
+          description: Uncommitted changes in the session
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EntryRecord'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Sessions]
+      summary: Approve and commit a session
+      operationId: approveSession
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SessionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitSessionRequest'
+      responses:
+        '200':
+          description: Session approved and committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitSessionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  # --- Commits ---
+  /organizations/{organization}/repositories/{repository}/commits/{commit_id}:
+    get:
+      tags: [Commits]
+      summary: Get a commit
+      operationId: getCommit
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: commit_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Commit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitLog'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/repositories/{repository}/commits/{commit_id}/revert:
+    post:
+      tags: [Commits]
+      summary: Revert a commit
+      description: >
+        Creates a new commit on the repository's default branch that undoes the
+        changes introduced by the specified commit. The target commit must have
+        exactly one parent (root and merge commits are not supported).
+      operationId: revertCommit
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: commit_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: >
+                    Optional commit message. When omitted the server generates
+                    'Revert "<original message>"'.
+                metadata:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Optional metadata to attach to the revert commit.
+      responses:
+        '201':
+          description: Revert commit created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commit_id:
+                    type: string
+                required:
+                  - commit_id
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organization}/repositories/{repository}/log:
+    get:
+      tags: [Commits]
+      summary: Get commit log
+      operationId: getLog
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: ref
+          in: query
+          required: false
+          description: Tag name or commit ID (defaults to latest commit)
+          schema:
+            type: string
+        - name: prefix
+          in: query
+          required: false
+          description: Filter to commits that modified any key starting with this prefix
+          schema:
+            type: string
+        - name: object
+          in: query
+          required: false
+          description: Filter to commits that modified this exact object key
+          schema:
+            type: string
+        - name: amount
+          in: query
+          required: false
+          description: Maximum number of commits to return (default 100, max 1000)
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+      responses:
+        '200':
+          description: Commit log
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CommitLog'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  # --- Diff ---
+  /organizations/{organization}/repositories/{repository}/diff:
+    get:
+      tags: [Commits]
+      summary: Diff between two refs
+      operationId: diffRefs
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: left
+          in: query
+          required: true
+          description: Left ref (commit ID)
+          schema:
+            type: string
+        - name: right
+          in: query
+          required: true
+          description: Right ref (commit ID)
+          schema:
+            type: string
+        - name: prefix
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: amount
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1000
+        - name: delimiter
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Diff results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ListingEntry'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  # --- Objects ---
+  /organizations/{organization}/repositories/{repository}/object:
+    get:
+      tags: [Objects]
+      summary: Get an object's content
+      operationId: getObject
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: false
+          description: Session ID to read from (defaults to latest committed state)
+          schema:
+            type: string
+            format: uuid
+        - name: ref
+          in: query
+          required: false
+          description: Reference (commit ID) to read from. Mutually exclusive with session_id.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Path'
+        - name: presign
+          in: query
+          required: false
+          description: If true, return a 307 redirect to a presigned S3 GET URL instead of streaming the object
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Object content
+          headers:
+            ETag:
+              schema:
+                type: string
+            Content-Type:
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '307':
+          description: Redirect to presigned S3 GET URL (when presign=true)
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+            Cache-Control:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+    head:
+      tags: [Objects]
+      summary: Check object existence and metadata
+      description: >
+        Returns the same headers as GET /object (ETag, Content-Type,
+        Content-Length, X-Cerebral-Reproducible) without streaming the body.
+        Uses the GetObject authorization action.
+      operationId: headObject
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: false
+          description: Session ID to read from (defaults to latest committed state)
+          schema:
+            type: string
+            format: uuid
+        - name: ref
+          in: query
+          required: false
+          description: Reference (commit ID) to read from. Mutually exclusive with session_id.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Path'
+      responses:
+        '200':
+          description: Object exists
+          headers:
+            ETag:
+              schema:
+                type: string
+            Content-Type:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+        '403':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Objects]
+      summary: Upload an object
+      operationId: putObject
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: true
+          description: Session ID to stage the write into
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Path'
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '201':
+          description: Object uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path:
+                    type: string
+                  etag:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    delete:
+      tags: [Objects]
+      summary: Delete an object (stage tombstone)
+      operationId: deleteObject
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: true
+          description: Session ID to stage the delete into
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Path'
+      responses:
+        '204':
+          description: Object deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /organizations/{organization}/repositories/{repository}/object/stage:
+    post:
+      tags: [Objects]
+      summary: Stage a presigned upload (get an upload URL)
+      description: >
+        Returns a presigned S3 PUT URL, a physical address, and a signature.
+        The client uploads directly to S3 using the upload URL, then calls
+        PUT /object/finalize to record the object in the catalog.
+      operationId: stageObject
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: true
+          description: Session ID to stage the write into
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Path'
+      responses:
+        '200':
+          description: Presigned upload details
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StageObjectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /organizations/{organization}/repositories/{repository}/object/finalize:
+    put:
+      tags: [Objects]
+      summary: Finalize a presigned upload
+      description: >
+        After uploading to S3 using the URL from POST /object/stage,
+        call this endpoint to verify the upload and record the object
+        in the catalog.
+      operationId: finalizeObject
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: true
+          description: Session ID to stage the write into
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Path'
+        - name: expires_at
+          in: query
+          required: true
+          description: Expiry timestamp from the stage response (RFC 3339)
+          schema:
+            type: string
+            format: date-time
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinalizeObjectRequest'
+      responses:
+        '201':
+          description: Object finalized
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinalizeObjectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organization}/repositories/{repository}/objects:
+    get:
+      tags: [Objects]
+      summary: List objects
+      operationId: listObjects
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: false
+          description: Session ID to list from (defaults to latest committed state)
+          schema:
+            type: string
+            format: uuid
+        - name: ref
+          in: query
+          required: false
+          description: Reference (commit ID) to list from. Mutually exclusive with session_id.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Prefix'
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Amount'
+        - name: delimiter
+          in: query
+          required: false
+          description: 'Delimiter for directory grouping (e.g., "/")'
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Object listing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ListingEntry'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /organizations/{organization}/repositories/{repository}/objects/delete:
+    post:
+      tags: [Objects]
+      summary: Delete multiple objects (stage tombstones)
+      operationId: deleteObjects
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: true
+          description: Session ID to stage the deletes into
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteObjectsRequest'
+      responses:
+        '200':
+          description: Delete results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteObjectsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Uncommitted Changes ---
+  /organizations/{organization}/repositories/{repository}/changes:
+    get:
+      tags: [Sessions]
+      summary: List uncommitted changes in a session
+      operationId: listUncommittedChanges
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: true
+          description: Session ID to list changes for
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Prefix'
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Amount'
+      responses:
+        '200':
+          description: Uncommitted changes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EntryRecord'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # --- Groups ---
+  /organizations/{organization}/groups:
+    post:
+      tags: [Groups]
+      summary: Create a group
+      operationId: createGroup
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '201':
+          description: Group created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Groups]
+      summary: List groups in the organization
+      operationId: listGroups
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/After'
+      responses:
+        '200':
+          description: Group list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Group'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /organizations/{organization}/groups/{group_id}:
+    get:
+      tags: [Groups]
+      summary: Get a group with its members and policy attachments
+      operationId: getGroup
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/GroupID'
+      responses:
+        '200':
+          description: Group with members and attachments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  group:
+                    $ref: '#/components/schemas/Group'
+                  members:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GroupMember'
+                  attachments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AttachmentRecord'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Groups]
+      summary: Update a group's name or description
+      operationId: updateGroup
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/GroupID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Updated group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Groups]
+      summary: Delete a group
+      operationId: deleteGroup
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/GroupID'
+      responses:
+        '204':
+          description: Group deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/groups/{group_id}/members:
+    post:
+      tags: [Groups]
+      summary: Add a member (user, group, role, or agent) to a group
+      operationId: addGroupMember
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/GroupID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_type, subject_id]
+              properties:
+                subject_type:
+                  type: string
+                  enum: [user, group, role, agent]
+                subject_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Member added
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Groups]
+      summary: Remove a member from a group
+      operationId: removeGroupMember
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/GroupID'
+        - name: subject_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [user, group, role, agent]
+        - name: subject_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Member removed
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Policies ---
+  /organizations/{organization}/policies:
+    post:
+      tags: [Policies]
+      summary: Create an authorization policy
+      operationId: createPolicy
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, rego]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                rego:
+                  type: string
+                  description: Rego policy document
+      responses:
+        '201':
+          description: Policy created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Policies]
+      summary: List policies in the organization
+      operationId: listPolicies
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/After'
+      responses:
+        '200':
+          description: Policy list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PolicySummary'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /organizations/{organization}/policies:validate:
+    post:
+      tags: [Policies]
+      summary: Validate a Rego policy document without saving
+      operationId: validatePolicy
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rego]
+              properties:
+                rego:
+                  type: string
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /organizations/{organization}/policies/{policy_id}:
+    get:
+      tags: [Policies]
+      summary: Get a policy with its attachments
+      operationId: getPolicy
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/PolicyID'
+      responses:
+        '200':
+          description: Policy with attachments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  policy:
+                    $ref: '#/components/schemas/Policy'
+                  attachments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AttachmentRecord'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Policies]
+      summary: Update a policy
+      operationId: updatePolicy
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/PolicyID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                rego:
+                  type: string
+      responses:
+        '200':
+          description: Updated policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Policies]
+      summary: Delete a policy
+      operationId: deletePolicy
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/PolicyID'
+      responses:
+        '204':
+          description: Policy deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Policy Attachments ---
+  /organizations/{organization}/policies/{policy_id}/attachments:
+    post:
+      tags: [Policies]
+      summary: Attach a policy to a user, group, role, or agent
+      operationId: attachPolicyToPrincipal
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/PolicyID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [principal_type, principal_id]
+              properties:
+                principal_type:
+                  type: string
+                  enum: [user, group, role, agent]
+                principal_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Policy attached
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Policies]
+      summary: Detach a policy from a user, group, role, or agent
+      operationId: detachPolicyFromPrincipal
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/PolicyID'
+        - name: principal_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [user, group, role, agent]
+        - name: principal_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Policy detached
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/attachments:
+    get:
+      tags: [Policies]
+      summary: List all policy attachments in the organization
+      operationId: listAllAttachments
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      responses:
+        '200':
+          description: All attachments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AttachmentRecord'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /organizations/{organization}/effective-policies:
+    get:
+      tags: [Policies]
+      summary: Get effective policies for a principal (direct + inherited from groups)
+      operationId: getEffectivePolicies
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: User ID (backward-compatible; use principal_type + principal_id instead)
+        - name: principal_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [user, role, group, agent]
+          description: Principal type (used with principal_id)
+        - name: principal_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Principal ID (used with principal_type)
+      responses:
+        '200':
+          description: Effective policy list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EffectivePolicy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /organizations/{organization}/effective-groups:
+    get:
+      tags: [Groups]
+      summary: Get effective groups for a principal (direct + inherited from nested groups)
+      operationId: getEffectiveGroups
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: User ID (backward-compatible; use principal_type + principal_id instead)
+        - name: principal_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [user, role, group, agent]
+          description: Principal type (used with principal_id)
+        - name: principal_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Principal ID (used with principal_type)
+      responses:
+        '200':
+          description: Effective group list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EffectiveGroup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # --- Roles ---
+  /organizations/{organization}/roles:
+    post:
+      tags: [Roles]
+      summary: Create a role (non-human identity)
+      operationId: createRole
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  pattern: '^[a-z0-9][a-z0-9-]{1,62}$'
+                description:
+                  type: string
+      responses:
+        '201':
+          description: Role created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Roles]
+      summary: List roles in the organization
+      operationId: listRoles
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Amount'
+      responses:
+        '200':
+          description: Role list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Role'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /organizations/{organization}/roles/{role_name}:
+    get:
+      tags: [Roles]
+      summary: Get a role by name
+      operationId: getRole
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/RoleName'
+      responses:
+        '200':
+          description: Role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Roles]
+      summary: Delete a role (revokes all its API keys)
+      operationId: deleteRole
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/RoleName'
+      responses:
+        '204':
+          description: Role deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/roles/{role_name}/auth/keys:
+    post:
+      tags: [Roles]
+      summary: Generate an API key for a role
+      operationId: createRoleAPIKey
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/RoleName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  description: Human-readable name for the key
+                description:
+                  type: string
+      responses:
+        '201':
+          description: API token created (token shown only once)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APITokenCreated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags: [Roles]
+      summary: List API keys for a role (no secrets)
+      operationId: listRoleAPIKeys
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/RoleName'
+      responses:
+        '200':
+          description: API token list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/APIToken'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/roles/{role_name}/auth/keys/{key_id}:
+    delete:
+      tags: [Roles]
+      summary: Revoke an API key for a role
+      operationId: revokeRoleAPIKey
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/RoleName'
+        - $ref: '#/components/parameters/KeyID'
+      responses:
+        '204':
+          description: Key revoked
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Agents ---
+  /organizations/{organization}/agents:
+    post:
+      tags: [Agents]
+      summary: Create an agent (non-human identity with metadata)
+      operationId: createAgent
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  pattern: '^[a-z0-9][a-z0-9-]{1,62}$'
+                description:
+                  type: string
+                metadata:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        '201':
+          description: Agent created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Agents]
+      summary: List agents in the organization
+      operationId: listAgents
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Amount'
+      responses:
+        '200':
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Agent'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /organizations/{organization}/agents/{agent_name}:
+    get:
+      tags: [Agents]
+      summary: Get an agent by name
+      operationId: getAgent
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/AgentName'
+      responses:
+        '200':
+          description: Agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Agents]
+      summary: Update an agent's description or metadata
+      operationId: updateAgent
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/AgentName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                metadata:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        '200':
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Agents]
+      summary: Delete an agent (revokes all its API keys)
+      operationId: deleteAgent
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/AgentName'
+      responses:
+        '204':
+          description: Agent deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/agents/{agent_name}/auth/keys:
+    post:
+      tags: [Agents]
+      summary: Generate an API key for an agent
+      operationId: createAgentAPIKey
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/AgentName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  description: Human-readable name for the key
+                description:
+                  type: string
+      responses:
+        '201':
+          description: API token created (token shown only once)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APITokenCreated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags: [Agents]
+      summary: List API keys for an agent (no secrets)
+      operationId: listAgentAPIKeys
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/AgentName'
+      responses:
+        '200':
+          description: API token list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/APIToken'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/agents/{agent_name}/auth/keys/{key_id}:
+    delete:
+      tags: [Agents]
+      summary: Revoke an API key for an agent
+      operationId: revokeAgentAPIKey
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/AgentName'
+        - $ref: '#/components/parameters/KeyID'
+      responses:
+        '204':
+          description: Key revoked
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Connectors (org-level) ---
+  /organizations/{organization}/connectors:
+    post:
+      tags: [Connectors]
+      summary: Create a connector
+      operationId: createConnector
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConnectorRequest'
+      responses:
+        '201':
+          description: Connector created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorInfo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Connectors]
+      summary: List organization connectors
+      operationId: listConnectors
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      responses:
+        '200':
+          description: Connector list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConnectorInfo'
+
+  /organizations/{organization}/connectors/{connector_id}:
+    get:
+      tags: [Connectors]
+      summary: Get a connector
+      operationId: getConnector
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/ConnectorID'
+      responses:
+        '200':
+          description: Connector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorInfo'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Connectors]
+      summary: Delete a connector (soft delete)
+      operationId: deleteConnector
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/ConnectorID'
+      responses:
+        '204':
+          description: Connector deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Repo Connector Attachments ---
+  /organizations/{organization}/repositories/{repository}/connectors:
+    post:
+      tags: [Connectors]
+      summary: Attach a connector to a repository
+      operationId: attachConnector
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connector_id]
+              properties:
+                connector_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Connector attached
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Connectors]
+      summary: List connectors attached to a repository
+      operationId: listRepoConnectors
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+      responses:
+        '200':
+          description: Attached connector list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConnectorInfo'
+
+  /organizations/{organization}/repositories/{repository}/connectors/{connector_id}:
+    delete:
+      tags: [Connectors]
+      summary: Detach a connector from a repository
+      operationId: detachConnector
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/ConnectorID'
+      responses:
+        '204':
+          description: Connector detached
+
+  # --- Import ---
+  /organizations/{organization}/repositories/{repository}/import:
+    post:
+      tags: [Import]
+      summary: Start an import job
+      operationId: startImport
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartImportRequest'
+      responses:
+        '202':
+          description: Import job started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                    format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organization}/repositories/{repository}/import/{job_id}:
+    get:
+      tags: [Import]
+      summary: Get import job status
+      operationId: getImportStatus
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Import job status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportJob'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    BasicAuth:
+      type: http
+      scheme: basic
+      description: Email and password authentication
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: 'API token authentication: pass the opaque token as a Bearer token'
+
+  parameters:
+    Organization:
+      name: organization
+      in: path
+      required: true
+      description: Organization slug
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9-]{1,62}$'
+    Repository:
+      name: repository
+      in: path
+      required: true
+      description: Repository name
+      schema:
+        type: string
+    SessionID:
+      name: session_id
+      in: path
+      required: true
+      description: Session ID
+      schema:
+        type: string
+        format: uuid
+    KeyID:
+      name: key_id
+      in: path
+      required: true
+      schema:
+        type: string
+    ConnectorID:
+      name: connector_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    GroupID:
+      name: group_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PolicyID:
+      name: policy_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RoleName:
+      name: role_name
+      in: path
+      required: true
+      description: Role name
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9-]{1,62}$'
+    AgentName:
+      name: agent_name
+      in: path
+      required: true
+      description: Agent name
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9-]{1,62}$'
+    Path:
+      name: path
+      in: query
+      required: true
+      description: Object path (URL-encoded, no leading /)
+      schema:
+        type: string
+    Prefix:
+      name: prefix
+      in: query
+      required: false
+      description: Filter by key prefix
+      schema:
+        type: string
+    After:
+      name: after
+      in: query
+      required: false
+      description: Pagination cursor (return results after this value)
+      schema:
+        type: string
+    Amount:
+      name: amount
+      in: query
+      required: false
+      description: Number of results per page (default 100, max 1000)
+      schema:
+        type: integer
+        default: 100
+        maximum: 1000
+
+  schemas:
+    Error:
+      type: object
+      required: [message, code, request_id]
+      additionalProperties: false
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+        request_id:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        has_more:
+          type: boolean
+        next_offset:
+          type: string
+        max_per_page:
+          type: integer
+
+    # --- Auth ---
+    SignupRequest:
+      type: object
+      required: [username, email, full_name, password]
+      additionalProperties: false
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        full_name:
+          type: string
+        password:
+          type: string
+          format: password
+          minLength: 8
+        company:
+          type: string
+        invite_code:
+          type: string
+          description: Hex-encoded HMAC-SHA256 invite token (required when server is in invite-only mode)
+
+    User:
+      type: object
+      required: [id, username, email, full_name, source, created_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+        full_name:
+          type: string
+        company:
+          type: string
+        source:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    APIToken:
+      type: object
+      required: [id, user_id, name, description, token_hint, created_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          description: Opaque key identifier for management operations — this is not the token
+        user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        token_hint:
+          type: string
+          description: Last 4 characters of the token for identification
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    APITokenCreated:
+      type: object
+      required: [token, id, name, description]
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          description: Full API token, shown only at creation time. Use as Bearer token in the Authorization header.
+        id:
+          type: string
+          description: Key identifier for management operations (listing, revocation)
+        name:
+          type: string
+        description:
+          type: string
+
+    UserEmail:
+      type: object
+      required: [id, user_id, email, is_primary, verified, created_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        is_primary:
+          type: boolean
+        verified:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    # --- Organizations ---
+    CreateOrgRequest:
+      type: object
+      required: [name, display_name]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{1,62}$'
+        display_name:
+          type: string
+
+    Organization:
+      type: object
+      required: [id, name, display_name, created_at]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        display_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Membership:
+      type: object
+      required: [organization_id, user_id, joined_at]
+      additionalProperties: false
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        full_name:
+          type: string
+        email:
+          type: string
+        joined_at:
+          type: string
+          format: date-time
+
+    AddMemberRequest:
+      type: object
+      required: [username]
+      properties:
+        username:
+          type: string
+
+    OrgSummary:
+      type: object
+      required: [id, name, display_name]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        display_name:
+          type: string
+
+    # --- Repositories ---
+    CreateRepositoryRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        visibility:
+          type: string
+          enum: [private, public]
+          default: private
+        session_max_duration_days:
+          type: integer
+          description: Maximum number of days a session can remain open before cleanup (default 7). Must be less than retention_days.
+        retention_days:
+          type: integer
+          description: Number of days of commit history to retain (default 14). Must be greater than session_max_duration_days.
+
+    Repository:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        visibility:
+          type: string
+        agents_require_approval:
+          type: boolean
+          description: When enabled, agent commits return 202 and require human approval
+        session_max_duration_days:
+          type: integer
+          description: Maximum number of days a session can remain open before cleanup
+        retention_days:
+          type: integer
+          description: Number of days of commit history to retain
+        created_by_type:
+          type: string
+          enum: [user, role, agent]
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    RepositoryWithOrg:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        visibility:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        organization_slug:
+          type: string
+        organization_display_name:
+          type: string
+
+    # --- Sessions ---
+    CreateSessionResponse:
+      type: object
+      required: [session_id]
+      additionalProperties: false
+      properties:
+        session_id:
+          type: string
+          format: uuid
+
+    CommitSessionRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    CommitSessionResponse:
+      type: object
+      required: [commit_id]
+      additionalProperties: false
+      properties:
+        commit_id:
+          type: string
+
+    ApprovalRequiredResponse:
+      type: object
+      required: [approval_required, session_id, message, api_url, web_url]
+      properties:
+        approval_required:
+          type: boolean
+        session_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+        api_url:
+          type: string
+          description: API endpoint for the approval page
+        web_url:
+          type: string
+          description: Browser URL for the approval page
+
+    # --- Commits ---
+    CommitLog:
+      type: object
+      properties:
+        id:
+          type: string
+        committer:
+          type: string
+        committer_type:
+          type: string
+          description: Principal type of the committer (empty for pre-migration commits)
+          enum: [user, role, agent]
+        committer_id:
+          type: string
+          format: uuid
+          description: UUID of the committer principal (empty for pre-migration commits)
+        message:
+          type: string
+        meta_range_id:
+          type: string
+        creation_date:
+          type: string
+          format: date-time
+        parents:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        object_count:
+          type: integer
+          format: int64
+          description: Total number of objects in the committed snapshot
+        total_size:
+          type: integer
+          format: int64
+          description: Total size in bytes of all objects in the committed snapshot
+
+    # --- Objects ---
+    ListingEntry:
+      type: object
+      required: [path, type]
+      properties:
+        path:
+          type: string
+        type:
+          type: string
+          enum: [object, prefix]
+        entry:
+          $ref: '#/components/schemas/Entry'
+          description: Present when type is "object"
+        status:
+          type: string
+          enum: [added, modified, removed]
+          description: Diff status for uncommitted changes
+
+    EntryRecord:
+      type: object
+      properties:
+        path:
+          type: string
+        entry:
+          $ref: '#/components/schemas/Entry'
+
+    Entry:
+      type: object
+      properties:
+        address:
+          type: string
+        last_modified:
+          type: string
+          format: date-time
+        size:
+          type: integer
+          format: int64
+        e_tag:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        address_type:
+          type: integer
+          description: '1=relative (uploaded), 2=full (imported)'
+        content_type:
+          type: string
+        source_metadata:
+          $ref: '#/components/schemas/SourceMetadata'
+
+    SourceMetadata:
+      type: object
+      properties:
+        connector_id:
+          type: string
+        connector_type:
+          type: string
+        source_path:
+          type: string
+        version_id:
+          type: string
+        source_etag:
+          type: string
+        import_time:
+          type: string
+          format: date-time
+        import_job_id:
+          type: string
+
+    # --- Presigned Uploads ---
+    StageObjectResponse:
+      type: object
+      required: [upload_url, physical_address, signature, expires_at]
+      additionalProperties: false
+      properties:
+        upload_url:
+          type: string
+          format: uri
+          description: Presigned S3 PUT URL for direct upload
+        physical_address:
+          type: string
+          description: Physical address of the object in block storage
+        signature:
+          type: string
+          description: HMAC signature to pass to the finalize endpoint
+        expires_at:
+          type: string
+          format: date-time
+          description: When the upload URL and signature expire
+
+    FinalizeObjectRequest:
+      type: object
+      required: [physical_address, signature]
+      additionalProperties: false
+      properties:
+        physical_address:
+          type: string
+          description: Physical address returned by the stage endpoint
+        signature:
+          type: string
+          description: HMAC signature returned by the stage endpoint
+        content_type:
+          type: string
+          description: Content type of the uploaded object (optional)
+
+    FinalizeObjectResponse:
+      type: object
+      required: [path, etag]
+      additionalProperties: false
+      properties:
+        path:
+          type: string
+        etag:
+          type: string
+
+    DeleteObjectsRequest:
+      type: object
+      required: [paths]
+      additionalProperties: false
+      properties:
+        paths:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 1000
+          description: List of object paths to delete (max 1000)
+
+    DeleteObjectsResponse:
+      type: object
+      properties:
+        deleted:
+          type: integer
+          description: Number of objects successfully deleted
+
+    # --- Roles ---
+    Role:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        created_by_type:
+          type: string
+          enum: [user, role, agent]
+        created_by:
+          type: string
+          format: uuid
+        created_by_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    # --- Agents ---
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        created_by_type:
+          type: string
+          enum: [user, role]
+        created_by:
+          type: string
+          format: uuid
+        created_by_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    # --- Groups ---
+    Group:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        created_by_type:
+          type: string
+          enum: [user, role, agent]
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    GroupMember:
+      type: object
+      properties:
+        subject_type:
+          type: string
+          enum: [user, group, role, agent]
+        subject_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        username:
+          type: string
+        added_at:
+          type: string
+          format: date-time
+
+    # --- Policies ---
+    Policy:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        rego:
+          type: string
+        is_builtin:
+          type: boolean
+        created_by_type:
+          type: string
+          enum: [user, role, agent]
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PolicySummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        is_builtin:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        attachment_count:
+          type: integer
+
+    AttachmentRecord:
+      type: object
+      properties:
+        policy_id:
+          type: string
+          format: uuid
+        policy_name:
+          type: string
+        is_builtin:
+          type: boolean
+        principal_type:
+          type: string
+          enum: [user, group, role, agent]
+        principal_id:
+          type: string
+          format: uuid
+        principal_name:
+          type: string
+        attached_by_type:
+          type: string
+          enum: [user, role, agent]
+        attached_by:
+          type: string
+          format: uuid
+        attached_at:
+          type: string
+          format: date-time
+
+    EffectiveGroup:
+      type: object
+      properties:
+        group_id:
+          type: string
+          format: uuid
+        group_name:
+          type: string
+        description:
+          type: string
+        source:
+          type: string
+          enum: [direct, group]
+        source_name:
+          type: string
+          description: Parent group name when source is "group"
+
+    EffectivePolicy:
+      type: object
+      properties:
+        policy_id:
+          type: string
+          format: uuid
+        policy_name:
+          type: string
+        is_builtin:
+          type: boolean
+        source:
+          type: string
+          enum: [direct, group]
+        source_name:
+          type: string
+          description: Group name when source is "group"
+
+    ValidationResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationError'
+
+    ValidationError:
+      type: object
+      properties:
+        line:
+          type: integer
+        column:
+          type: integer
+        message:
+          type: string
+
+    # --- Connectors ---
+    CreateConnectorRequest:
+      type: object
+      required: [name, type, source_uri, config]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [s3, gcs]
+        source_uri:
+          type: string
+          description: 'Source URI (e.g., s3://bucket/prefix/ or gs://bucket/prefix/)'
+        config:
+          type: object
+          description: Connector-specific config (e.g., S3 credentials)
+
+    ConnectorInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+        source_uri:
+          type: string
+        disabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    # --- Import ---
+    StartImportRequest:
+      type: object
+      required: [connector_id, destination_path]
+      properties:
+        connector_id:
+          type: string
+          format: uuid
+        destination_path:
+          type: string
+          description: Destination path prefix in the repository
+        source_prefix:
+          type: string
+          description: Optional sub-path appended to the connector's source URI to filter which objects are imported
+        commit_message:
+          type: string
+
+    ImportJob:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        repository_id:
+          type: string
+          format: uuid
+        connector_id:
+          type: string
+          format: uuid
+        destination_path:
+          type: string
+        source_prefix:
+          type: string
+        commit_message:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, canceled]
+        objects_imported:
+          type: integer
+          format: int64
+        commit_id:
+          type: string
+        error:
+          type: string
+        created_by_type:
+          type: string
+          enum: [user, role, agent]
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
