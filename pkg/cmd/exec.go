@@ -1,0 +1,97 @@
+package cmd
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"time"
+
+	"github.com/tilderun/tilde-cli/pkg/api"
+	"github.com/spf13/cobra"
+)
+
+func newExecCmd() *cobra.Command {
+	var (
+		image   string
+		envVars []string
+		timeout string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "exec <organization>/<repository> -- COMMAND...",
+		Short: "Execute a command in a sandbox",
+		Long:  "Creates a non-interactive sandbox, runs the given command, streams output, and exits with the sandbox's exit code.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return fmt.Errorf("missing required arguments: <organization>/<repository> and command\n\nUsage: tilde exec <organization>/<repository> -- COMMAND...")
+			}
+			if len(args) < 2 {
+				return fmt.Errorf("missing command after <organization>/<repository>\n\nUsage: tilde exec <organization>/<repository> -- COMMAND...")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			org, repo, err := parseRepoFlag(args[0])
+			if err != nil {
+				return err
+			}
+
+			timeoutSeconds, err := parseDurationToSeconds(timeout)
+			if err != nil {
+				return err
+			}
+
+			envMap, err := parseEnvVars(envVars)
+			if err != nil {
+				return err
+			}
+
+			command := args[1:]
+
+			req := api.CreateSandboxRequest{
+				Image:          image,
+				Command:        command,
+				TimeoutSeconds: timeoutSeconds,
+				EnvVars:        envMap,
+			}
+
+			resp, err := apiClient.CreateSandbox(cmd.Context(), org, repo, req)
+			if err != nil {
+				return err
+			}
+
+			ctx := cmd.Context()
+			rc, err := apiClient.StreamSandboxOutput(ctx, org, repo, resp.SandboxID, "combined")
+			if err != nil {
+				return fmt.Errorf("streaming output: %w", err)
+			}
+			_, _ = io.Copy(os.Stdout, rc)
+			rc.Close()
+
+			// Poll for final status
+			for {
+				status, err := apiClient.GetSandboxStatus(ctx, org, repo, resp.SandboxID)
+				if err != nil {
+					return fmt.Errorf("getting sandbox status: %w", err)
+				}
+				switch status.Status {
+				case "committed", "awaiting_approval", "failed", "cancelled":
+					if status.ExitCode != nil {
+						os.Exit(*status.ExitCode)
+					}
+					if status.Status == "failed" {
+						os.Exit(1)
+					}
+					return nil
+				}
+				time.Sleep(time.Second)
+			}
+		},
+	}
+
+	cmd.Flags().StringVar(&image, "image", defaultImage, "Container image")
+	cmd.Flags().StringArrayVarP(&envVars, "env", "e", nil, "Environment variables (KEY=VALUE)")
+	cmd.Flags().StringVar(&timeout, "timeout", "", "Sandbox timeout (e.g. 30s, 5m, 1h)")
+
+	return cmd
+}

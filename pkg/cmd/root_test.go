@@ -6,10 +6,10 @@ import (
 )
 
 func TestRootCmd_MissingAPIKey(t *testing.T) {
-	os.Unsetenv("CEREBRAL_API_KEY")
+	os.Unsetenv("TILDE_API_KEY")
 
 	root := NewRootCmd()
-	root.SetArgs([]string{"session", "start", "cb://org/repo"})
+	root.SetArgs([]string{"repository", "ls"})
 	err := root.Execute()
 	if err == nil {
 		t.Fatal("expected error for missing API key")
@@ -20,10 +20,10 @@ func TestRootCmd_MissingAPIKey(t *testing.T) {
 }
 
 func TestRootCmd_InvalidAPIKeyPrefix(t *testing.T) {
-	t.Setenv("CEREBRAL_API_KEY", "bad-prefix-key")
+	t.Setenv("TILDE_API_KEY", "bad-prefix-key")
 
 	root := NewRootCmd()
-	root.SetArgs([]string{"session", "start", "cb://org/repo"})
+	root.SetArgs([]string{"repository", "ls"})
 	err := root.Execute()
 	if err == nil {
 		t.Fatal("expected error for invalid API key prefix")
@@ -34,8 +34,7 @@ func TestRootCmd_InvalidAPIKeyPrefix(t *testing.T) {
 }
 
 func TestRootCmd_ValidAPIKey(t *testing.T) {
-	t.Setenv("CEREBRAL_API_KEY", "cak-test1234")
-	// This will fail at the network level, but should pass the PersistentPreRunE
+	t.Setenv("TILDE_API_KEY", "tuk-test1234")
 	root := NewRootCmd()
 	root.SetArgs([]string{"--help"})
 	err := root.Execute()
@@ -44,13 +43,26 @@ func TestRootCmd_ValidAPIKey(t *testing.T) {
 	}
 }
 
+func TestRootCmd_ValidAPIKey_AllPrefixes(t *testing.T) {
+	for _, prefix := range []string{"tuk-", "trk-", "tak-"} {
+		t.Run(prefix, func(t *testing.T) {
+			t.Setenv("TILDE_API_KEY", prefix+"test1234")
+			root := NewRootCmd()
+			root.SetArgs([]string{"--help"})
+			err := root.Execute()
+			if err != nil {
+				t.Fatalf("help should not error: %v", err)
+			}
+		})
+	}
+}
+
 func TestRootCmd_CustomEndpoint(t *testing.T) {
-	t.Setenv("CEREBRAL_API_KEY", "cak-test1234")
-	t.Setenv("CEREBRAL_ENDPOINT_URL", "https://custom.example.com/")
+	t.Setenv("TILDE_API_KEY", "tuk-test1234")
+	t.Setenv("TILDE_ENDPOINT_URL", "https://custom.example.com/")
 
 	root := NewRootCmd()
-	// Use session start to trigger PersistentPreRunE which sets up the client
-	root.SetArgs([]string{"session", "start", "cb://org/repo"})
+	root.SetArgs([]string{"repository", "ls"})
 	// It will error on the actual HTTP call but we just want PreRunE to pass
 	_ = root.Execute()
 
@@ -62,68 +74,6 @@ func TestRootCmd_CustomEndpoint(t *testing.T) {
 	}
 }
 
-func TestRootCmd_CustomConcurrency(t *testing.T) {
-	t.Setenv("CEREBRAL_API_KEY", "cak-test1234")
-	t.Setenv("CEREBRAL_CLI_MAX_CONCURRENCY", "8")
-
-	root := NewRootCmd()
-	root.SetArgs([]string{"session", "start", "cb://org/repo"})
-	_ = root.Execute()
-
-	if maxConcurrency != 8 {
-		t.Errorf("maxConcurrency = %d, want 8", maxConcurrency)
-	}
-}
-
-func TestRootCmd_InvalidConcurrency(t *testing.T) {
-	t.Setenv("CEREBRAL_API_KEY", "cak-test1234")
-	t.Setenv("CEREBRAL_CLI_MAX_CONCURRENCY", "notanumber")
-
-	root := NewRootCmd()
-	root.SetArgs([]string{"session", "start", "cb://org/repo"})
-	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error for invalid concurrency")
-	}
-}
-
-func TestRootCmd_ZeroConcurrency(t *testing.T) {
-	t.Setenv("CEREBRAL_API_KEY", "cak-test1234")
-	t.Setenv("CEREBRAL_CLI_MAX_CONCURRENCY", "0")
-
-	root := NewRootCmd()
-	root.SetArgs([]string{"session", "start", "cb://org/repo"})
-	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error for zero concurrency")
-	}
-}
-
-func TestRootCmd_NegativeConcurrency(t *testing.T) {
-	t.Setenv("CEREBRAL_API_KEY", "cak-test1234")
-	t.Setenv("CEREBRAL_CLI_MAX_CONCURRENCY", "-1")
-
-	root := NewRootCmd()
-	root.SetArgs([]string{"session", "start", "cb://org/repo"})
-	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error for negative concurrency")
-	}
-}
-
-func TestRootCmd_DefaultConcurrency(t *testing.T) {
-	t.Setenv("CEREBRAL_API_KEY", "cak-test1234")
-	os.Unsetenv("CEREBRAL_CLI_MAX_CONCURRENCY")
-
-	root := NewRootCmd()
-	root.SetArgs([]string{"session", "start", "cb://org/repo"})
-	_ = root.Execute()
-
-	if maxConcurrency != defaultConcurrency {
-		t.Errorf("maxConcurrency = %d, want %d", maxConcurrency, defaultConcurrency)
-	}
-}
-
 func TestRootCmd_HasAllSubcommands(t *testing.T) {
 	root := NewRootCmd()
 
@@ -132,7 +82,7 @@ func TestRootCmd_HasAllSubcommands(t *testing.T) {
 		subcommands[cmd.Name()] = true
 	}
 
-	expected := []string{"session", "cp", "rm", "ls"}
+	expected := []string{"sandbox", "repository", "shell", "exec"}
 	for _, name := range expected {
 		if !subcommands[name] {
 			t.Errorf("missing subcommand %q", name)
@@ -141,7 +91,7 @@ func TestRootCmd_HasAllSubcommands(t *testing.T) {
 }
 
 func TestRootCmd_HelpDoesNotRequireAPIKey(t *testing.T) {
-	os.Unsetenv("CEREBRAL_API_KEY")
+	os.Unsetenv("TILDE_API_KEY")
 
 	root := NewRootCmd()
 	root.SetArgs([]string{"--help"})

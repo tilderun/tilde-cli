@@ -5,66 +5,59 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 
-	"github.com/cerebral-storage/cerebral-cli/pkg/api"
+	"github.com/tilderun/tilde-cli/pkg/api"
 	"github.com/spf13/cobra"
 )
 
-const (
-	defaultEndpoint    = "https://cerebral.storage"
-	defaultConcurrency = 16
-	apiKeyPrefix       = "cak-"
-)
+const defaultEndpoint = "https://tilde.run"
+
+var validKeyPrefixes = []string{"tuk-", "trk-", "tak-"}
 
 // Global state shared across subcommands
-var (
-	apiClient      *api.Client
-	maxConcurrency int
-)
+var apiClient *api.Client
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "cerebral",
-		Short: "CLI for the Cerebral data versioning API",
-		Long: `cerebral is a command-line tool for managing data objects in Cerebral repositories
-using session-based workflows.
+		Use:   "tilde",
+		Short: "CLI for the Tilde sandbox runtime",
+		Long: `tilde is a command-line tool for running sandboxed workloads on Tilde.
 
-Repositories are referenced using the cb:// URI scheme:
+Run a sandbox:
 
-  cb://organization/repository[/path]
+  tilde sandbox run -r organization/repository --image alpine -- echo hello
 
-All data operations (cp, ls, rm) require an active session. Create one with:
+Get an interactive shell:
 
-  cerebral session start cb://organization/repository
+  tilde shell organization/repository
 
-Then pass the returned session ID to every command via --session.
+Execute a command:
 
-Changes made within a session are staged — they are not visible to other sessions
-or durably stored until committed:
-
-  cerebral session commit --session SESSION_ID -m "description" cb://organization/repository
-
-To discard uncommitted changes, roll back the session:
-
-  cerebral session rollback --session SESSION_ID cb://organization/repository`,
+  tilde exec organization/repository -- ls -la`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip validation for help and completion commands
 			if cmd.Name() == "help" || cmd.Name() == "completion" {
 				return nil
 			}
 
-			apiKey := os.Getenv("CEREBRAL_API_KEY")
+			apiKey := os.Getenv("TILDE_API_KEY")
 			if apiKey == "" {
-				return fmt.Errorf("CEREBRAL_API_KEY environment variable is required.\nSet it to your agent API key (starts with %q).", apiKeyPrefix)
+				return fmt.Errorf("TILDE_API_KEY environment variable is required.\nSet it to your API key (starts with %q).", validKeyPrefixes[0])
 			}
-			if !strings.HasPrefix(apiKey, apiKeyPrefix) {
-				return fmt.Errorf("CEREBRAL_API_KEY must start with %q. Got: %q...", apiKeyPrefix, apiKey[:min(len(apiKey), 8)])
+			validPrefix := false
+			for _, p := range validKeyPrefixes {
+				if strings.HasPrefix(apiKey, p) {
+					validPrefix = true
+					break
+				}
+			}
+			if !validPrefix {
+				return fmt.Errorf("TILDE_API_KEY must start with one of %v. Got: %q...", validKeyPrefixes, apiKey[:min(len(apiKey), 8)])
 			}
 
-			endpoint := os.Getenv("CEREBRAL_ENDPOINT_URL")
+			endpoint := os.Getenv("TILDE_ENDPOINT_URL")
 			if endpoint == "" {
 				endpoint = defaultEndpoint
 			}
@@ -73,27 +66,16 @@ To discard uncommitted changes, roll back the session:
 
 			apiClient = api.NewClient(baseURL, apiKey)
 
-			// Parse concurrency
-			maxConcurrency = defaultConcurrency
-			if v := os.Getenv("CEREBRAL_CLI_MAX_CONCURRENCY"); v != "" {
-				n, err := strconv.Atoi(v)
-				if err != nil || n < 1 {
-					return fmt.Errorf("CEREBRAL_CLI_MAX_CONCURRENCY must be a positive integer, got %q", v)
-				}
-				maxConcurrency = n
-			}
-
 			return nil
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 
-	root.AddCommand(newSessionCmd())
+	root.AddCommand(newSandboxCmd())
+	root.AddCommand(newShellCmd())
+	root.AddCommand(newExecCmd())
 	root.AddCommand(newRepositoryCmd())
-	root.AddCommand(newCpCmd())
-	root.AddCommand(newRmCmd())
-	root.AddCommand(newLsCmd())
 
 	return root
 }

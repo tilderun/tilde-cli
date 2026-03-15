@@ -1,10 +1,10 @@
 openapi: 3.0.3
 info:
-  title: Cerebral API
+  title: Tilde API
   description: Cloud data versioning service for heterogeneous sources.
   version: 1.0.0
   contact:
-    name: Cerebral
+    name: Tilde
 servers:
   - url: /api/v1
 
@@ -648,8 +648,6 @@ paths:
                 visibility:
                   type: string
                   enum: [private, public]
-                agents_require_approval:
-                  type: boolean
                 session_max_duration_days:
                   type: integer
                   description: Maximum number of days a session can remain open before cleanup. Must be less than retention_days.
@@ -722,7 +720,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommitSessionResponse'
         '202':
-          description: Approval required (agents_require_approval is enabled and caller is an agent)
+          description: Approval required (policy-based session taint detected for agent caller)
           content:
             application/json:
               schema:
@@ -1013,6 +1011,11 @@ paths:
     get:
       tags: [Objects]
       summary: Get an object's content
+      description: >
+        Supports HTTP Range requests (single ranges only). When a valid Range
+        header is present, the server returns 206 Partial Content with the
+        requested byte range. This enables efficient partial reads of large
+        files such as Parquet.
       operationId: getObject
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -1038,9 +1041,15 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: Range
+          in: header
+          required: false
+          description: 'HTTP byte range (e.g., "bytes=0-1023"). Only single ranges are supported.'
+          schema:
+            type: string
       responses:
         '200':
-          description: Object content
+          description: Full object content (no Range header or Range not satisfiable)
           headers:
             ETag:
               schema:
@@ -1048,6 +1057,46 @@ paths:
             Content-Type:
               schema:
                 type: string
+            Accept-Ranges:
+              schema:
+                type: string
+                enum: [bytes]
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+            X-Tilde-Meta-*:
+              description: >
+                User-defined metadata headers. Each key from the object's metadata
+                map is returned as X-Tilde-Meta-<key>.
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial content (Range request satisfied)
+          headers:
+            Content-Range:
+              schema:
+                type: string
+                description: 'Byte range delivered, e.g. "bytes 0-1023/49152"'
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+            ETag:
+              schema:
+                type: string
+            Content-Type:
+              schema:
+                type: string
+            Accept-Ranges:
+              schema:
+                type: string
+                enum: [bytes]
           content:
             application/octet-stream:
               schema:
@@ -1065,12 +1114,19 @@ paths:
                 type: string
         '404':
           $ref: '#/components/responses/NotFound'
+        '416':
+          description: Range not satisfiable
+          headers:
+            Content-Range:
+              schema:
+                type: string
+                description: 'Total size, e.g. "bytes */49152"'
     head:
       tags: [Objects]
       summary: Check object existence and metadata
       description: >
         Returns the same headers as GET /object (ETag, Content-Type,
-        Content-Length, X-Cerebral-Reproducible) without streaming the body.
+        Content-Length) without streaming the body.
         Uses the GetObject authorization action.
       operationId: headObject
       parameters:
@@ -1104,6 +1160,12 @@ paths:
               schema:
                 type: integer
                 format: int64
+            X-Tilde-Meta-*:
+              description: >
+                User-defined metadata headers. Each key from the object's metadata
+                map is returned as X-Tilde-Meta-<key>.
+              schema:
+                type: string
         '403':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -1123,6 +1185,8 @@ paths:
             type: string
             format: uuid
         - $ref: '#/components/parameters/Path'
+      description: >
+        Upload an object. Set custom metadata via X-Tilde-Meta-<key> request headers.
       requestBody:
         required: true
         content:
@@ -1164,6 +1228,57 @@ paths:
           description: Object deleted
         '400':
           $ref: '#/components/responses/BadRequest'
+
+  /organizations/{organization}/repositories/{repository}/object/copy:
+    post:
+      tags: [Objects]
+      summary: Copy an object within a session
+      description: >
+        Copies a catalog entry from the source path to the destination path
+        within the same session. The underlying data is not transferred; the
+        destination entry references the same physical object. Use together
+        with DELETE /object to implement rename.
+      operationId: copyObject
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: true
+          description: Session ID for the copy operation
+          schema:
+            type: string
+            format: uuid
+        - name: source_path
+          in: query
+          required: true
+          description: Path of the source object
+          schema:
+            type: string
+        - name: destination_path
+          in: query
+          required: true
+          description: Path for the destination object
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Object copied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source_path:
+                    type: string
+                  destination_path:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /organizations/{organization}/repositories/{repository}/object/stage:
     post:
@@ -1251,6 +1366,227 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+
+  /organizations/{organization}/repositories/{repository}/object/multipart:
+    post:
+      tags: [Objects]
+      summary: Initiate a multipart upload
+      description: >
+        Creates a multipart upload in block storage and returns an upload handle
+        with a signed token. The token must be passed to all subsequent multipart
+        operations (part upload, complete, abort).
+      operationId: initiateMultipartUpload
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: true
+          description: Session ID to stage the write into
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Path'
+      responses:
+        '201':
+          description: Multipart upload initiated
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitiateMultipartUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '501':
+          description: Multipart upload not supported by storage backend
+
+  /organizations/{organization}/repositories/{repository}/object/multipart/part:
+    get:
+      tags: [Objects]
+      summary: Get a presigned URL for uploading a part
+      description: >
+        Returns a 307 redirect to a presigned S3 URL for uploading a single part.
+        The client should PUT the part data directly to the redirect URL.
+      operationId: getPartPresignedURL
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: token
+          in: query
+          required: true
+          description: Signed token from the initiate response
+          schema:
+            type: string
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: physical_address
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: upload_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: expires_at
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: part_number
+          in: query
+          required: true
+          description: Part number (1-based, max 10000)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+      responses:
+        '307':
+          description: Redirect to presigned upload URL
+          headers:
+            Location:
+              description: Presigned S3 URL for uploading the part
+              schema:
+                type: string
+                format: uri
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /organizations/{organization}/repositories/{repository}/object/multipart/complete:
+    post:
+      tags: [Objects]
+      summary: Complete a multipart upload
+      description: >
+        Completes the multipart upload in S3 and stages the catalog entry
+        in the given session. The total_size is authoritative (from client write tracking).
+      operationId: completeMultipartUpload
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: token
+          in: query
+          required: true
+          description: Signed token from the initiate response
+          schema:
+            type: string
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: physical_address
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: upload_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: expires_at
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteMultipartUploadRequest'
+      responses:
+        '201':
+          description: Upload completed and catalog entry staged
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteMultipartUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/repositories/{repository}/object/multipart/abort:
+    post:
+      tags: [Objects]
+      summary: Abort a multipart upload
+      description: >
+        Aborts the multipart upload and cleans up any uploaded parts in S3.
+      operationId: abortMultipartUpload
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: token
+          in: query
+          required: true
+          description: Signed token from the initiate response
+          schema:
+            type: string
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: physical_address
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: upload_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: expires_at
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '204':
+          description: Multipart upload aborted
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /organizations/{organization}/repositories/{repository}/objects:
     get:
@@ -1651,6 +1987,46 @@ paths:
                 $ref: '#/components/schemas/ValidationResult'
         '400':
           $ref: '#/components/responses/BadRequest'
+
+  /organizations/{organization}/policies:generate:
+    post:
+      tags: [Policies]
+      summary: Generate a Rego policy from a natural language prompt using AI
+      operationId: generatePolicy
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt:
+                  type: string
+                  description: Natural language description of the desired policy
+                  maxLength: 4000
+      responses:
+        '200':
+          description: Generated Rego policy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rego]
+                properties:
+                  rego:
+                    type: string
+                    description: Valid Rego policy source code
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /organizations/{organization}/policies/{policy_id}:
     get:
@@ -2153,7 +2529,7 @@ paths:
           $ref: '#/components/responses/NotFound'
     put:
       tags: [Agents]
-      summary: Update an agent's description or metadata
+      summary: Update an agent's description, metadata, or inline policy
       operationId: updateAgent
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -2171,6 +2547,9 @@ paths:
                   type: object
                   additionalProperties:
                     type: string
+                inline_policy:
+                  type: string
+                  description: Rego policy source to set as the agent's inline policy. Empty string clears it.
       responses:
         '200':
           description: Updated agent
@@ -2346,6 +2725,59 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /organizations/{organization}/connectors:test:
+    post:
+      tags: [Connectors]
+      summary: Test connector config before creation
+      operationId: testConnectorConfig
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestConnectorConfigRequest'
+      responses:
+        '200':
+          description: Connection test successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestConnectionResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          description: Connection test failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /organizations/{organization}/connectors/{connector_id}/test:
+    post:
+      tags: [Connectors]
+      summary: Test an existing connector's connection
+      operationId: testConnector
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/ConnectorID'
+      responses:
+        '200':
+          description: Connection test successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestConnectionResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          description: Connection test failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   # --- Repo Connector Attachments ---
   /organizations/{organization}/repositories/{repository}/connectors:
     post:
@@ -2461,6 +2893,627 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  # --- Sandboxes ---
+  /organizations/{organization}/repositories/{repository}/sandboxes:
+    post:
+      tags: [Sandboxes]
+      summary: Create and run a sandbox
+      operationId: createSandbox
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSandboxRequest'
+      responses:
+        '201':
+          description: Sandbox created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sandbox_id:
+                    type: string
+                    format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    get:
+      tags: [Sandboxes]
+      summary: List sandboxes for this repository
+      operationId: listSandboxes
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: after
+          in: query
+          schema:
+            type: string
+        - name: amount
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Sandbox list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Sandbox'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}:
+    get:
+      tags: [Sandboxes]
+      summary: Get sandbox details
+      operationId: getSandbox
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SandboxID'
+      responses:
+        '200':
+          description: Sandbox details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Sandboxes]
+      summary: Cancel a running sandbox
+      operationId: cancelSandbox
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SandboxID'
+      responses:
+        '202':
+          description: Cancellation accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/status:
+    get:
+      tags: [Sandboxes]
+      summary: Get sandbox status summary
+      operationId: getSandboxStatus
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SandboxID'
+      responses:
+        '200':
+          description: Status summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxStatusResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/stdout:
+    get:
+      tags: [Sandboxes]
+      summary: Stream sandbox stdout
+      operationId: getSandboxStdout
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SandboxID'
+      responses:
+        '200':
+          description: Stdout stream
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Logs have been evicted
+
+  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/stderr:
+    get:
+      tags: [Sandboxes]
+      summary: Stream sandbox stderr
+      operationId: getSandboxStderr
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SandboxID'
+      responses:
+        '200':
+          description: Stderr stream
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Logs have been evicted
+
+  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/combined:
+    get:
+      tags: [Sandboxes]
+      summary: Stream sandbox combined output
+      description: >
+        Interleaved stdout and stderr stream, in the order output was produced
+        by the container (similar to terminal shell output).
+      operationId: getSandboxCombined
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SandboxID'
+      responses:
+        '200':
+          description: Combined stdout+stderr stream
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Logs have been evicted
+
+  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/terminal:
+    get:
+      tags: [Sandboxes]
+      summary: Connect to interactive sandbox terminal
+      description: >
+        WebSocket endpoint for bidirectional terminal I/O with an interactive sandbox.
+        Upgrades to a WebSocket connection using binary frames. Only available for
+        sandboxes created with `interactive: true` that are in a non-terminal state.
+
+        Binary frame protocol (first byte is frame type):
+        - `0x00` (client→server): stdin data
+        - `0x01` (server→client): stdout/stderr data (TTY-merged)
+        - `0x02` (client→server): JSON resize `{"cols":N,"rows":N}`
+        - `0x03` (server→client): JSON exit `{"exited":true,"exit_code":N}`
+      operationId: getSandboxTerminal
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SandboxID'
+      responses:
+        '200':
+          description: WebSocket upgrade successful (101 Switching Protocols)
+        '400':
+          description: Sandbox is not interactive
+        '409':
+          description: Terminal session unavailable (e.g., after crash recovery)
+        '410':
+          description: Sandbox has already finished
+
+  # --- Sandbox Triggers ---
+  /organizations/{organization}/repositories/{repository}/sandbox-triggers:
+    post:
+      tags: [Sandbox Triggers]
+      summary: Create a sandbox trigger
+      operationId: createSandboxTrigger
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSandboxTriggerRequest'
+      responses:
+        '201':
+          description: Trigger created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxTrigger'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Sandbox Triggers]
+      summary: List sandbox triggers
+      operationId: listSandboxTriggers
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: after
+          in: query
+          schema:
+            type: string
+        - name: amount
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Trigger list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SandboxTrigger'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /organizations/{organization}/repositories/{repository}/sandbox-triggers/{trigger_id}:
+    get:
+      tags: [Sandbox Triggers]
+      summary: Get a sandbox trigger
+      operationId: getSandboxTrigger
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: trigger_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Trigger detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxTrigger'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Sandbox Triggers]
+      summary: Update a sandbox trigger (full replacement)
+      operationId: updateSandboxTrigger
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: trigger_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSandboxTriggerRequest'
+      responses:
+        '200':
+          description: Updated trigger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxTrigger'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    patch:
+      tags: [Sandbox Triggers]
+      summary: Toggle trigger enabled/disabled
+      operationId: patchSandboxTrigger
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: trigger_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchSandboxTriggerRequest'
+      responses:
+        '200':
+          description: Updated trigger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxTrigger'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Sandbox Triggers]
+      summary: Delete a sandbox trigger
+      operationId: deleteSandboxTrigger
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: trigger_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Trigger deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/repositories/{repository}/sandbox-triggers/{trigger_id}/runs:
+    get:
+      tags: [Sandbox Triggers]
+      summary: List trigger runs (execution history)
+      operationId: listSandboxTriggerRuns
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: trigger_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: after
+          in: query
+          schema:
+            type: string
+        - name: amount
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Trigger run list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SandboxTriggerRun'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Secrets ---
+  /organizations/{organization}/repositories/{repository}/secrets:
+    get:
+      tags: [Secrets]
+      summary: List repository secrets (keys and metadata only)
+      operationId: listSecrets
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+      responses:
+        '200':
+          description: Secret list (values are never included)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SecretListEntry'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /organizations/{organization}/repositories/{repository}/secrets/{secret_key}:
+    put:
+      tags: [Secrets]
+      summary: Create or update a repository secret
+      operationId: putSecret
+      description: |
+        Creates or updates an encrypted secret scoped to this repository.
+        The total request body is limited to 64 KiB by the server.
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SecretKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutSecretRequest'
+      responses:
+        '200':
+          description: Secret saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      tags: [Secrets]
+      summary: Get decrypted secret value
+      operationId: getSecret
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SecretKey'
+      responses:
+        '200':
+          description: Decrypted secret value
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecretValueResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Secrets]
+      summary: Delete a repository secret
+      operationId: deleteSecret
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SecretKey'
+      responses:
+        '204':
+          description: Secret deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # --- Agent Secrets ---
+  /organizations/{organization}/agents/{agent_name}/secrets:
+    get:
+      tags: [Agents]
+      summary: List agent secrets (keys and metadata only)
+      operationId: listAgentSecrets
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/AgentName'
+      responses:
+        '200':
+          description: Secret list (values are never included)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SecretListEntry'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organization}/agents/{agent_name}/secrets/{secret_key}:
+    put:
+      tags: [Agents]
+      summary: Create or update an agent secret
+      operationId: putAgentSecret
+      description: |
+        Creates or updates an encrypted secret scoped to this agent.
+        The total request body is limited to 64 KiB by the server.
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/AgentName'
+        - $ref: '#/components/parameters/SecretKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutSecretRequest'
+      responses:
+        '200':
+          description: Secret saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags: [Agents]
+      summary: Get decrypted agent secret value
+      operationId: getAgentSecret
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/AgentName'
+        - $ref: '#/components/parameters/SecretKey'
+      responses:
+        '200':
+          description: Decrypted secret value
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+            Pragma:
+              schema:
+                type: string
+                example: no-cache
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecretValueResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Agents]
+      summary: Delete an agent secret
+      operationId: deleteAgentSecret
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/AgentName'
+        - $ref: '#/components/parameters/SecretKey'
+      responses:
+        '204':
+          description: Secret deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 components:
   securitySchemes:
     BasicAuth:
@@ -2569,6 +3622,22 @@ components:
         type: integer
         default: 100
         maximum: 1000
+    SandboxID:
+      name: sandbox_id
+      in: path
+      required: true
+      description: Sandbox ID (same as session ID)
+      schema:
+        type: string
+        format: uuid
+    SecretKey:
+      name: secret_key
+      in: path
+      required: true
+      description: Secret key name
+      schema:
+        type: string
+        pattern: '^[A-Za-z_][A-Za-z0-9_-]{0,255}$'
 
   schemas:
     Error:
@@ -2809,9 +3878,6 @@ components:
           type: string
         visibility:
           type: string
-        agents_require_approval:
-          type: boolean
-          description: When enabled, agent commits return 202 and require human approval
         session_max_duration_days:
           type: integer
           description: Maximum number of days a session can remain open before cleanup
@@ -2934,6 +4000,9 @@ components:
           type: integer
           format: int64
           description: Total size in bytes of all objects in the committed snapshot
+        is_stale:
+          type: boolean
+          description: Whether this commit is beyond the repository's retention period. Objects from stale commits cannot be listed or read.
 
     # --- Objects ---
     ListingEntry:
@@ -3040,8 +4109,78 @@ components:
         content_type:
           type: string
           description: Content type of the uploaded object (optional)
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: User-defined metadata key-value pairs to store with the object
 
     FinalizeObjectResponse:
+      type: object
+      required: [path, etag]
+      additionalProperties: false
+      properties:
+        path:
+          type: string
+        etag:
+          type: string
+
+    InitiateMultipartUploadResponse:
+      type: object
+      required: [upload_id, physical_address, token, expires_at]
+      additionalProperties: false
+      properties:
+        upload_id:
+          type: string
+          description: S3 multipart upload ID
+        physical_address:
+          type: string
+          description: Physical address of the object in block storage
+        token:
+          type: string
+          description: HMAC-signed token binding this upload to a specific context
+        expires_at:
+          type: integer
+          format: int64
+          description: Unix timestamp when the token expires
+
+    CompleteMultipartUploadRequest:
+      type: object
+      required: [parts, total_size]
+      additionalProperties: false
+      properties:
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompletedPart'
+          minItems: 1
+          description: List of completed parts with their part numbers and ETags
+        content_type:
+          type: string
+          description: Content type of the uploaded object (defaults to application/octet-stream)
+        total_size:
+          type: integer
+          format: int64
+          description: Total size in bytes (authoritative, from client write tracking)
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: User-defined metadata key-value pairs to store with the object
+
+    CompletedPart:
+      type: object
+      required: [part_number, etag]
+      additionalProperties: false
+      properties:
+        part_number:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        etag:
+          type: string
+
+    CompleteMultipartUploadResponse:
       type: object
       required: [path, etag]
       additionalProperties: false
@@ -3119,6 +4258,14 @@ components:
           type: object
           additionalProperties:
             type: string
+        inline_policy:
+          type: string
+          description: Rego policy source evaluated inline for this agent
+        inline_policy_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of last inline policy update
         created_by_type:
           type: string
           enum: [user, role]
@@ -3322,7 +4469,7 @@ components:
           type: string
         type:
           type: string
-          enum: [s3, gcs]
+          enum: [s3, gcs, git]
         source_uri:
           type: string
           description: 'Source URI (e.g., s3://bucket/prefix/ or gs://bucket/prefix/)'
@@ -3344,24 +4491,65 @@ components:
           type: string
         disabled:
           type: boolean
+        public_key:
+          type: string
+          nullable: true
+          description: >-
+            SSH public key (Ed25519). Present only for git connectors.
+            Add as a read-only deploy key in your Git repository settings.
         created_at:
           type: string
           format: date-time
 
+    TestConnectorConfigRequest:
+      type: object
+      required: [type, source_uri, config]
+      properties:
+        type:
+          type: string
+          enum: [s3, gcs, git]
+        source_uri:
+          type: string
+        config:
+          type: object
+          description: Connector-specific config
+
+    TestConnectionResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+
     # --- Import ---
     StartImportRequest:
       type: object
-      required: [connector_id, destination_path]
+      required: [destination_path]
+      description: >
+        Exactly one of `connector_id` or (`source_organization` + `source_repository`) must be provided.
       properties:
         connector_id:
           type: string
           format: uuid
+          description: >
+            Connector ID to import from. Mutually exclusive with
+            source_organization/source_repository.
+        source_organization:
+          type: string
+          description: >
+            Source organization slug for cross-repository import.
+            Required together with source_repository; mutually exclusive with connector_id.
+        source_repository:
+          type: string
+          description: >
+            Source repository name for cross-repository import.
+            Required together with source_organization; mutually exclusive with connector_id.
         destination_path:
           type: string
           description: Destination path prefix in the repository
         source_prefix:
           type: string
-          description: Optional sub-path appended to the connector's source URI to filter which objects are imported
+          description: Optional sub-path to filter which objects are imported
         commit_message:
           type: string
 
@@ -3377,6 +4565,17 @@ components:
         connector_id:
           type: string
           format: uuid
+          nullable: true
+        source_repository_id:
+          type: string
+          format: uuid
+          nullable: true
+        source_organization:
+          type: string
+          description: Display-only field populated for cross-repository imports
+        source_repository:
+          type: string
+          description: Display-only field populated for cross-repository imports
         destination_path:
           type: string
         source_prefix:
@@ -3399,6 +4598,356 @@ components:
         created_by:
           type: string
           format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateSandboxRequest:
+      type: object
+      required: [image]
+      properties:
+        image:
+          type: string
+          description: Docker image to run
+        command:
+          type: array
+          items:
+            type: string
+          description: Command to execute in the container
+        mountpoint:
+          type: string
+          default: /sandbox
+          description: Path inside the container where data is mounted
+        path_prefix:
+          type: string
+          default: ''
+          description: Path prefix within the repository to mount
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          description: Maximum execution time in seconds. Cannot exceed repository session max duration.
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+          description: Environment variables for the container
+        run_as:
+          type: object
+          description: Run the sandbox as a different principal (agent or role). Not allowed with interactive mode.
+          properties:
+            type:
+              type: string
+              enum: [agent, role]
+              description: Principal type to run as
+            id:
+              type: string
+              format: uuid
+              description: UUID of the agent or role
+          required: [type, id]
+        interactive:
+          type: boolean
+          default: false
+          description: >
+            Enable interactive terminal mode. When true, the sandbox allocates a TTY and
+            exposes a WebSocket endpoint for bidirectional terminal I/O. The command defaults
+            to /bin/sh if not specified. Cannot be used with run_as.
+
+    Sandbox:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        repository_id:
+          type: string
+          format: uuid
+        image:
+          type: string
+        command:
+          type: array
+          items:
+            type: string
+        mountpoint:
+          type: string
+        path_prefix:
+          type: string
+        timeout_seconds:
+          type: integer
+          nullable: true
+        interactive:
+          type: boolean
+          description: Whether the sandbox is an interactive terminal session
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+        status:
+          type: string
+          enum: [starting, running, committed, awaiting_approval, failed, cancelled]
+        status_reason:
+          type: string
+        error_message:
+          type: string
+        exit_code:
+          type: integer
+          nullable: true
+        commit_id:
+          type: string
+        web_url:
+          type: string
+        volume_name:
+          type: string
+        container_id:
+          type: string
+        created_by_type:
+          type: string
+          enum: [user, role, agent]
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    SandboxStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [starting, running, committed, awaiting_approval, failed, cancelled]
+        status_reason:
+          type: string
+        exit_code:
+          type: integer
+          nullable: true
+        commit_id:
+          type: string
+        web_url:
+          type: string
+
+    PutSecretRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+          minLength: 1
+          description: The secret value (UTF-8 string). Server limits total request body to 64 KiB.
+
+    SecretListEntry:
+      type: object
+      properties:
+        key:
+          type: string
+        created_by_type:
+          type: string
+          enum: [user, role, agent]
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SecretValueResponse:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+
+    SandboxTriggerCondition:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [prefix, path_exact]
+        prefix:
+          type: string
+          description: Prefix to match (for prefix type)
+        path:
+          type: string
+          description: Exact path to match (for path_exact type)
+        diff_type:
+          type: string
+          enum: [any, added, removed, changed]
+          default: any
+          description: Diff type filter (for path_exact type)
+
+    SandboxTriggerConfig:
+      type: object
+      required: [image]
+      properties:
+        image:
+          type: string
+        command:
+          type: array
+          items:
+            type: string
+        mountpoint:
+          type: string
+        path_prefix:
+          type: string
+        timeout_seconds:
+          type: integer
+          minimum: 1
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+
+    SandboxTrigger:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        repository_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        enabled:
+          type: boolean
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SandboxTriggerCondition'
+        sandbox_config:
+          $ref: '#/components/schemas/SandboxTriggerConfig'
+        run_as:
+          type: object
+          nullable: true
+          properties:
+            type:
+              type: string
+              enum: [agent, role]
+            id:
+              type: string
+              format: uuid
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateSandboxTriggerRequest:
+      type: object
+      required: [name, conditions, sandbox_config]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SandboxTriggerCondition'
+          minItems: 1
+          maxItems: 10
+        sandbox_config:
+          $ref: '#/components/schemas/SandboxTriggerConfig'
+        run_as:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [agent, role]
+            id:
+              type: string
+              format: uuid
+          required: [type, id]
+        enabled:
+          type: boolean
+          default: true
+
+    UpdateSandboxTriggerRequest:
+      type: object
+      required: [name, conditions, sandbox_config]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SandboxTriggerCondition'
+          minItems: 1
+          maxItems: 10
+        sandbox_config:
+          $ref: '#/components/schemas/SandboxTriggerConfig'
+        run_as:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [agent, role]
+            id:
+              type: string
+              format: uuid
+          required: [type, id]
+
+    PatchSandboxTriggerRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+
+    SandboxTriggerRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        repository_id:
+          type: string
+          format: uuid
+        trigger_id:
+          type: string
+          format: uuid
+        commit_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, created, skipped, failed]
+        reason:
+          type: string
+          description: Machine-readable reason (populated for skipped/failed runs)
+        sandbox_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Sandbox ID if a sandbox was created
+        matched_paths:
+          type: array
+          items:
+            type: string
+          description: Paths or prefixes that matched the trigger conditions
         created_at:
           type: string
           format: date-time
@@ -3433,6 +4982,24 @@ components:
             $ref: '#/components/schemas/Error'
     Conflict:
       description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadGateway:
+      description: Upstream service error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServiceUnavailable:
+      description: Service not configured or temporarily unavailable
       content:
         application/json:
           schema:

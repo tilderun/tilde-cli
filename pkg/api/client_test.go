@@ -11,19 +11,19 @@ import (
 )
 
 func TestNewClient(t *testing.T) {
-	c := NewClient("https://example.com/api/v1", "cak-testkey")
+	c := NewClient("https://example.com/api/v1", "tuk-testkey")
 
 	if c.BaseURL != "https://example.com/api/v1" {
 		t.Errorf("BaseURL = %q, want %q", c.BaseURL, "https://example.com/api/v1")
 	}
-	if c.APIKey != "cak-testkey" {
-		t.Errorf("APIKey = %q, want %q", c.APIKey, "cak-testkey")
+	if c.APIKey != "tuk-testkey" {
+		t.Errorf("APIKey = %q, want %q", c.APIKey, "tuk-testkey")
 	}
 	if c.HTTPClient == nil {
 		t.Error("HTTPClient is nil")
 	}
-	if c.S3Client == nil {
-		t.Error("S3Client is nil")
+	if c.StreamClient == nil {
+		t.Error("StreamClient is nil")
 	}
 }
 
@@ -35,15 +35,15 @@ func TestClient_do_SetsAuthHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "cak-mykey")
+	c := NewClient(srv.URL, "tuk-mykey")
 	resp, err := c.do(context.Background(), http.MethodGet, "/test", nil)
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
 	resp.Body.Close()
 
-	if gotAuth != "Bearer cak-mykey" {
-		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer cak-mykey")
+	if gotAuth != "Bearer tuk-mykey" {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer tuk-mykey")
 	}
 }
 
@@ -55,7 +55,7 @@ func TestClient_do_SetsContentTypeForBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "cak-key")
+	c := NewClient(srv.URL, "tuk-key")
 
 	// With body
 	resp, err := c.do(context.Background(), http.MethodPost, "/test", bytes.NewReader([]byte(`{"a":"b"}`)))
@@ -90,7 +90,7 @@ func TestClient_do_DoesNotFollowRedirects(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "cak-key")
+	c := NewClient(srv.URL, "tuk-key")
 	resp, err := c.do(context.Background(), http.MethodGet, "/redirect", nil)
 	if err != nil {
 		t.Fatalf("do: %v", err)
@@ -109,45 +109,45 @@ func TestClient_do_DoesNotFollowRedirects(t *testing.T) {
 func TestClient_doJSON_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"session_id": "abc-123"})
+		json.NewEncoder(w).Encode(map[string]string{"sandbox_id": "sb-123"})
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "cak-key")
+	c := NewClient(srv.URL, "tuk-key")
 
-	var resp CreateSessionResponse
-	_, err := c.doJSON(context.Background(), http.MethodPost, "/sessions", nil, &resp)
+	var resp CreateSandboxResponse
+	_, err := c.doJSON(context.Background(), http.MethodPost, "/sandboxes", nil, &resp)
 	if err != nil {
 		t.Fatalf("doJSON: %v", err)
 	}
-	if resp.SessionID != "abc-123" {
-		t.Errorf("SessionID = %q, want %q", resp.SessionID, "abc-123")
+	if resp.SandboxID != "sb-123" {
+		t.Errorf("SandboxID = %q, want %q", resp.SandboxID, "sb-123")
 	}
 }
 
 func TestClient_doJSON_WithRequestBody(t *testing.T) {
-	var gotBody map[string]string
+	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&gotBody)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"commit_id": "c-1"})
+		json.NewEncoder(w).Encode(map[string]string{"sandbox_id": "sb-1"})
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "cak-key")
-	reqBody := &CommitRequest{Message: "test commit"}
+	c := NewClient(srv.URL, "tuk-key")
+	reqBody := &CreateSandboxRequest{Image: "alpine", Command: []string{"echo", "hello"}}
 
-	var resp CommitResponse
-	_, err := c.doJSON(context.Background(), http.MethodPost, "/commit", reqBody, &resp)
+	var resp CreateSandboxResponse
+	_, err := c.doJSON(context.Background(), http.MethodPost, "/sandboxes", reqBody, &resp)
 	if err != nil {
 		t.Fatalf("doJSON: %v", err)
 	}
 
-	if gotBody["message"] != "test commit" {
-		t.Errorf("request body message = %q, want %q", gotBody["message"], "test commit")
+	if gotBody["image"] != "alpine" {
+		t.Errorf("request body image = %v, want %q", gotBody["image"], "alpine")
 	}
-	if resp.CommitID != "c-1" {
-		t.Errorf("CommitID = %q, want %q", resp.CommitID, "c-1")
+	if resp.SandboxID != "sb-1" {
+		t.Errorf("SandboxID = %q, want %q", resp.SandboxID, "sb-1")
 	}
 }
 
@@ -163,9 +163,9 @@ func TestClient_doJSON_APIError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "cak-key")
-	var resp CreateSessionResponse
-	_, err := c.doJSON(context.Background(), http.MethodPost, "/sessions", nil, &resp)
+	c := NewClient(srv.URL, "tuk-key")
+	var resp CreateSandboxResponse
+	_, err := c.doJSON(context.Background(), http.MethodPost, "/sandboxes", nil, &resp)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -188,7 +188,7 @@ func TestClient_doJSON_NoContent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "cak-key")
+	c := NewClient(srv.URL, "tuk-key")
 	_, err := c.doJSON(context.Background(), http.MethodDelete, "/something", nil, nil)
 	if err != nil {
 		t.Fatalf("doJSON with 204: %v", err)
@@ -201,7 +201,7 @@ func TestClient_doJSON_ContextCancelled(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "cak-key")
+	c := NewClient(srv.URL, "tuk-key")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -219,7 +219,7 @@ func TestClient_doRaw_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "cak-key")
+	c := NewClient(srv.URL, "tuk-key")
 	resp, err := c.doRaw(context.Background(), http.MethodGet, "/object", nil, "")
 	if err != nil {
 		t.Fatalf("doRaw: %v", err)
@@ -239,7 +239,7 @@ func TestClient_doRaw_Error(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "cak-key")
+	c := NewClient(srv.URL, "tuk-key")
 	_, err := c.doRaw(context.Background(), http.MethodGet, "/object", nil, "")
 	if err == nil {
 		t.Fatal("expected error")
@@ -261,7 +261,7 @@ func TestClient_doRaw_SetsContentType(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "cak-key")
+	c := NewClient(srv.URL, "tuk-key")
 	resp, err := c.doRaw(context.Background(), http.MethodPut, "/upload", nil, "application/octet-stream")
 	if err != nil {
 		t.Fatalf("doRaw: %v", err)
@@ -270,5 +270,41 @@ func TestClient_doRaw_SetsContentType(t *testing.T) {
 
 	if gotCT != "application/octet-stream" {
 		t.Errorf("Content-Type = %q, want %q", gotCT, "application/octet-stream")
+	}
+}
+
+func TestClient_doStream_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tuk-key" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		w.Write([]byte("streaming data"))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tuk-key")
+	resp, err := c.doStream(context.Background(), http.MethodGet, "/stream", nil)
+	if err != nil {
+		t.Fatalf("doStream: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "streaming data" {
+		t.Errorf("body = %q, want %q", string(body), "streaming data")
+	}
+}
+
+func TestClient_doStream_Error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+		w.Write([]byte(`{"message":"not found"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tuk-key")
+	_, err := c.doStream(context.Background(), http.MethodGet, "/stream", nil)
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }

@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/cerebral-storage/cerebral-cli/pkg/api"
+	"github.com/tilderun/tilde-cli/pkg/api"
 	"github.com/spf13/cobra"
 )
 

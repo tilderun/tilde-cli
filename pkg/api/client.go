@@ -10,12 +10,12 @@ import (
 	"time"
 )
 
-// Client is the Cerebral API HTTP client.
+// Client is the Tilde API HTTP client.
 type Client struct {
-	BaseURL    string // e.g. "https://cerebral.storage/api/v1"
-	APIKey     string
-	HTTPClient *http.Client
-	S3Client   *http.Client // separate client for S3 (no auth, follows redirects, no timeout)
+	BaseURL      string // e.g. "https://tilde.run/api/v1"
+	APIKey       string
+	HTTPClient   *http.Client
+	StreamClient *http.Client // separate client for long-lived streaming (no timeout)
 }
 
 // NewClient creates a new API client.
@@ -30,8 +30,8 @@ func NewClient(baseURL, apiKey string) *Client {
 				return http.ErrUseLastResponse
 			},
 		},
-		S3Client: &http.Client{
-			// No timeout for large file transfers
+		StreamClient: &http.Client{
+			// No timeout for long-lived streaming connections
 			// Default redirect policy (follows redirects)
 		},
 	}
@@ -49,6 +49,30 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (*
 		req.Header.Set("Content-Type", "application/json")
 	}
 	return c.HTTPClient.Do(req)
+}
+
+// doStream executes an HTTP request using the StreamClient (no timeout) for long-lived connections.
+func (c *Client) doStream(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	url := c.BaseURL + path
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.StreamClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode >= 400 {
+		defer resp.Body.Close()
+		return resp, parseAPIError(resp)
+	}
+	return resp, nil
 }
 
 // doJSON executes an API request and decodes the JSON response.

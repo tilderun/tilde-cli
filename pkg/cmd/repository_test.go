@@ -3,17 +3,25 @@ package cmd
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
-	"github.com/cerebral-storage/cerebral-cli/pkg/api"
+	"github.com/tilderun/tilde-cli/pkg/api"
 )
+
+func setupTestEnv(t *testing.T, handler http.HandlerFunc) {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	t.Setenv("TILDE_API_KEY", "tuk-testkey")
+	t.Setenv("TILDE_ENDPOINT_URL", srv.URL)
+}
 
 func TestRepositoryLs_All(t *testing.T) {
 	setupTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %s, want GET", r.Method)
 		}
-		// No org — should hit /repositories
 		if r.URL.Path != "/api/v1/repositories" {
 			t.Errorf("path = %s, want /api/v1/repositories", r.URL.Path)
 		}
@@ -36,7 +44,6 @@ func TestRepositoryLs_All(t *testing.T) {
 
 func TestRepositoryLs_ByOrg(t *testing.T) {
 	setupTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
-		// Should hit /organizations/myorg/repositories
 		if r.URL.Path != "/api/v1/organizations/myorg/repositories" {
 			t.Errorf("path = %s, want /api/v1/organizations/myorg/repositories", r.URL.Path)
 		}

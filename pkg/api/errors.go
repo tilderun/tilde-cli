@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
-// APIError represents a structured error from the Cerebral API.
+// APIError represents a structured error from the Tilde API.
 type APIError struct {
 	StatusCode int    `json:"-"`
 	Message    string `json:"message"`
@@ -26,9 +25,6 @@ func (e *APIError) Error() string {
 	}
 	if e.RequestID != "" {
 		s += fmt.Sprintf(" (request_id: %s)", e.RequestID)
-	}
-	if e.StatusCode == http.StatusNotFound && strings.Contains(strings.ToLower(e.Message), "session not found") {
-		s += "\nPlease create a new session to continue working."
 	}
 	return s
 }
