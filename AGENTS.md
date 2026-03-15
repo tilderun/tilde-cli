@@ -1,79 +1,71 @@
-# Cerebral CLI — Agent Guide
+# Tilde CLI — Agent Guide
 
 ## Project Overview
 
-This is a Go CLI (`cerebral`) for the Cerebral data versioning API. It provides session-based workflows: open a session, upload/download/delete/list objects, then commit or rollback.
+This is a Go CLI (`tilde`) for the Tilde sandbox runtime API. It provides commands to create and manage sandboxes, attach interactive terminals, stream output, and list repositories.
 
 ## API Specification
 
-The full OpenAPI 3.0 specification lives at `api/openapi.yaml`. The CLI only uses a subset of the available endpoints — specifically sessions and objects.
+The full OpenAPI 3.0 specification lives at `api/openapi.yaml`. The CLI uses the sandbox and repository endpoints.
 
 ## Project Layout
 
 ```
-cmd/cerebral/main.go              # Entry point — calls cmd.Execute()
+cmd/tilde/main.go                 # Entry point — calls cmd.Execute()
 pkg/
   cmd/
     root.go                       # Root cobra command, env config, signal handling
     repository.go                 # repository ls
-    session.go                    # session start / commit / rollback
-    cp.go                         # cp (upload + download, single + recursive)
-    rm.go                         # rm (single + recursive bulk delete)
-    ls.go                         # ls (paginated listing)
+    sandbox.go                    # sandbox run (parent command + run subcommand)
+    sandbox_logs.go               # sandbox logs
+    sandbox_info.go               # sandbox info
+    shell.go                      # shell (interactive sandbox shortcut)
+    exec.go                       # exec (non-interactive sandbox shortcut)
+    terminal.go                   # WebSocket terminal attach (raw mode, resize, stdin/stdout)
+    repo_flag.go                  # organization/repository argument parser
   api/
-    client.go                     # HTTP client: auth, base URL, redirect handling
+    client.go                     # HTTP client: auth, base URL, streaming support
     repositories.go               # Repository API methods (list)
-    sessions.go                   # Session API methods (create, commit, rollback)
-    objects.go                    # Object API methods (get, stage, finalize, list, delete, bulk delete)
+    sandboxes.go                  # Sandbox API methods (create, get, cancel, status, stream, terminal)
     types.go                      # Request/response structs matching the OpenAPI spec
     errors.go                     # APIError type, parsing, helpers
-  uri/
-    uri.go                        # cb:// URI parser → {Org, Repo, Path}
-  upload/
-    upload.go                     # Presigned upload pipeline: stage → S3 PUT → finalize
-  download/
-    download.go                   # Presigned download: GET presigned URL → download from S3
   pool/
     pool.go                       # Bounded concurrency worker pool with fail-fast
 api/
-  openapi.yaml                    # Full Cerebral API specification
+  openapi.yaml                    # Full Tilde API specification
 ```
 
 ## Key Architecture Decisions
 
-1. **Presigned uploads**: `stage → S3 PUT → finalize` — avoids proxying file data through the API server.
-2. **Presigned downloads**: `GET with presign=true → 307 redirect` — the API client captures the redirect and the S3 client follows it.
-3. **Two HTTP clients**: The API client disables redirect following (to capture 307 presigned URLs). The S3 client has default redirect policy and no timeout (for large files).
-4. **Worker pool**: Channel-based semaphore with context cancellation for fail-fast behavior on errors.
-5. **Global state**: `apiClient` and `maxConcurrency` are package-level vars in `pkg/cmd`, initialized in `PersistentPreRunE`.
-6. **Session-not-found hint**: When the API returns a 404 with "session not found", the error message includes a hint to create a new session.
+1. **Two HTTP clients**: `HTTPClient` (30s timeout, no redirect following) for API calls. `StreamClient` (no timeout) for long-lived streaming connections.
+2. **WebSocket terminal**: Uses `gorilla/websocket` with `NextReader()` for streaming reads without buffering entire messages. Binary frame protocol: 0x00=stdin, 0x01=data, 0x02=resize (JSON), 0x03=exit (JSON).
+3. **Worker pool**: Channel-based semaphore with context cancellation for fail-fast behavior on errors.
+4. **Global state**: `apiClient` is a package-level var in `pkg/cmd`, initialized in `PersistentPreRunE`.
+5. **Sandbox status polling**: After streaming output, polls `GetSandboxStatus` until a terminal state (`committed`, `awaiting_approval`, `failed`, `cancelled`) is reached.
+6. **Wait for running**: Interactive commands poll sandbox status until `running` before attempting WebSocket connection.
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `cerebral repository ls [organization]` | List accessible repositories |
-| `cerebral session start cb://organization/repository` | Start a new session |
-| `cerebral session commit --session ID -m "msg" cb://organization/repository` | Commit a session |
-| `cerebral session rollback --session ID cb://organization/repository` | Rollback a session |
-| `cerebral cp --session ID [-v] <src> <dst>` | Upload or download (direction from URI position) |
-| `cerebral cp --session ID [-v] -r <src> <dst>` | Recursive upload or download |
-| `cerebral ls --session ID cb://organization/repository[/prefix]` | List objects |
-| `cerebral rm --session ID cb://organization/repository/path` | Delete a single object |
-| `cerebral rm --session ID -r cb://organization/repository/prefix` | Recursive bulk delete |
+| `tilde sandbox run -r organization/repository --image IMG [-- CMD...]` | Create and run a sandbox |
+| `tilde sandbox logs -r organization/repository SANDBOX_ID` | Stream sandbox output |
+| `tilde sandbox info -r organization/repository SANDBOX_ID` | Show sandbox details |
+| `tilde shell organization/repository [-- CMD...]` | Interactive sandbox (default: busybox:latest) |
+| `tilde exec organization/repository -- CMD...` | Non-interactive sandbox (default: busybox:latest) |
+| `tilde repository ls [organization]` | List accessible repositories |
 
 ## Environment Variables
 
 | Variable | Required | Default |
 |---|---|---|
-| `CEREBRAL_API_KEY` | Yes | — |
-| `CEREBRAL_ENDPOINT_URL` | No | `https://cerebral.storage` |
-| `CEREBRAL_CLI_MAX_CONCURRENCY` | No | `16` |
+| `TILDE_API_KEY` | Yes | — |
+| `TILDE_ENDPOINT_URL` | No | `https://tilde.run` |
 
 ## Building
 
 ```bash
-go build ./cmd/cerebral
+go build ./cmd/tilde
 ```
 
 ## Testing
@@ -83,9 +75,8 @@ go test ./...          # run all tests
 go test -race ./...    # with race detector
 ```
 
-Tests use `net/http/httptest` to mock both the Cerebral API and S3 endpoints. No external services are required.
+Tests use `net/http/httptest` to mock the Tilde API. No external services are required.
 
 # Terminology
 
 In all client facing documentation (README.md, help messages, flag names, etc) - always use full "organization" and "repository" terms, not "org" or "repo".
-

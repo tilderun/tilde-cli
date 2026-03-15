@@ -1,17 +1,17 @@
-# Cerebral CLI
+# Tilde CLI
 
-A command-line interface for the [Cerebral](https://cerebral.storage) data versioning API. Designed to be operated by AI agents first, humans second — every command is explicit, stateless, and returns structured output suitable for programmatic consumption.
+A command-line interface for the [Tilde](https://tilde.run) sandbox runtime. Designed to be operated by AI agents first, humans second — every command is explicit, stateless, and returns structured output suitable for programmatic consumption.
 
 ## Installation
 
 ### From release binaries
 
-Download the latest binary for your platform from the [Releases](https://github.com/cerebral-storage/cerebral-cli/releases) page.
+Download the latest binary for your platform from the [Releases](https://github.com/tilderun/tilde-cli/releases) page.
 
 ### From source
 
 ```bash
-go install github.com/cerebral-storage/cerebral-cli/cmd/cerebral@latest
+go install github.com/tilderun/tilde-cli/cmd/tilde@latest
 ```
 
 ## Configuration
@@ -20,109 +20,73 @@ The CLI is configured entirely via environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `CEREBRAL_API_KEY` | *(required)* | Agent API key (must start with `cak-`) |
-| `CEREBRAL_ENDPOINT_URL` | `https://cerebral.storage` | Base URL for the Cerebral API |
-| `CEREBRAL_CLI_MAX_CONCURRENCY` | `16` | Max parallel upload/download workers |
+| `TILDE_API_KEY` | *(required)* | API key (must start with `tuk-`, `trk-`, or `tak-`) |
+| `TILDE_ENDPOINT_URL` | `https://tilde.run` | Base URL for the Tilde API |
 
 ```bash
-export CEREBRAL_API_KEY=cak-your-key-here
+export TILDE_API_KEY=tuk-your-key-here
 ```
 
-## Workflow
-
-All data operations in Cerebral are session-based. The typical workflow is:
-
-1. **Start a session** — creates an isolated workspace for staging changes
-2. **Upload, download, delete objects** — all mutations are staged in the session
-3. **Commit** — atomically applies all staged changes and creates a new version
-4. Or **rollback** — discards all staged changes
-
 ## Commands
+
+### Run a sandbox
+
+```bash
+# Run a command in a sandbox and stream output
+tilde sandbox run -r organization/repository --image alpine -- echo hello
+
+# Run in detached mode (print sandbox ID and exit)
+tilde sandbox run -r organization/repository --image alpine -d -- echo hello
+
+# Run with environment variables and a timeout
+tilde sandbox run -r organization/repository --image alpine -e FOO=bar --timeout 300 -- ./script.sh
+```
+
+### Interactive shell
+
+```bash
+# Start an interactive shell
+tilde shell organization/repository
+
+# Start with a specific image
+tilde shell organization/repository --image ubuntu:latest
+
+# Run a specific command interactively
+tilde shell organization/repository -- /bin/sh -l
+```
+
+### Execute a command
+
+```bash
+# Run a command non-interactively, stream output, exit with sandbox's exit code
+tilde exec organization/repository -- ls -la
+
+# With a custom image
+tilde exec organization/repository --image python:3.12 -- python script.py
+```
+
+### Sandbox management
+
+```bash
+# View sandbox logs
+tilde sandbox logs -r organization/repository SANDBOX_ID
+
+# Follow logs
+tilde sandbox logs -f -r organization/repository SANDBOX_ID
+
+# Get sandbox details
+tilde sandbox info -r organization/repository SANDBOX_ID
+```
 
 ### List repositories
 
 ```bash
 # List all accessible repositories
-cerebral repository ls
+tilde repository ls
 
 # List repositories in a specific organization
-cerebral repository ls my-organization
+tilde repository ls my-organization
 ```
-
-### Session management
-
-```bash
-# Start a new session
-cerebral session start cb://organization/repository
-# → prints session_id
-
-# Commit a session
-cerebral session commit --session SESSION_ID -m "Add training data" cb://organization/repository
-# → prints commit_id (or approval URL if review is required)
-
-# Rollback a session
-cerebral session rollback --session SESSION_ID cb://organization/repository
-```
-
-### Copy objects (`cp`)
-
-```bash
-# Upload a file
-cerebral cp --session SESSION_ID ./local/file.csv cb://organization/repository/data/file.csv
-
-# Download a file
-cerebral cp --session SESSION_ID cb://organization/repository/data/file.csv ./local/file.csv
-
-# Download to stdout
-cerebral cp --session SESSION_ID cb://organization/repository/data/file.csv -
-
-# Recursive upload
-cerebral cp --session SESSION_ID -r ./local/data/ cb://organization/repository/data/
-
-# Recursive download
-cerebral cp --session SESSION_ID -r cb://organization/repository/data/ ./local/data/
-
-# Show per-file progress
-cerebral cp --session SESSION_ID -v -r ./local/data/ cb://organization/repository/data/
-```
-
-### List objects (`ls`)
-
-```bash
-# List top-level objects and prefixes
-cerebral ls --session SESSION_ID cb://organization/repository
-
-# List with prefix
-cerebral ls --session SESSION_ID cb://organization/repository/data/
-
-# Recursive listing (flat, no directory grouping)
-cerebral ls --session SESSION_ID -r cb://organization/repository
-
-# Limit results
-cerebral ls --session SESSION_ID --max-results 100 cb://organization/repository
-```
-
-### Delete objects (`rm`)
-
-```bash
-# Delete a single object
-cerebral rm --session SESSION_ID cb://organization/repository/data/file.csv
-
-# Delete all objects under a prefix
-cerebral rm --session SESSION_ID -r cb://organization/repository/data/
-```
-
-## URI Format
-
-All repository references use the `cb://` scheme:
-
-```
-cb://organization/repository[/path]
-```
-
-- `organization` — the Cerebral organization slug
-- `repository` — the repository name
-- `path` — optional object path or prefix
 
 ## Agent Usage
 
@@ -130,9 +94,8 @@ This CLI is optimized for non-interactive, automated use:
 
 - **No prompts** — all required inputs are flags or arguments; missing values produce immediate errors
 - **Structured errors** — API errors include the HTTP status, error code, and request ID for debugging
-- **Exit codes** — `0` for success, `1` for any error
-- **Stdout/stderr separation** — data goes to stdout, progress and errors go to stderr
-- **Partial failure reporting** — recursive operations report per-file errors and a summary count
+- **Exit codes** — `0` for success, non-zero mirrors the sandbox exit code
+- **Stdout/stderr separation** — sandbox output goes to stdout, errors go to stderr
 
 ## License
 
