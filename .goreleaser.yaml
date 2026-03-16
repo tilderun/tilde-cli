@@ -1,8 +1,8 @@
 version: 2
 
 builds:
-  - main: ./cmd/cerebral
-    binary: cerebral
+  - main: ./cmd/tilde
+    binary: tilde
     env:
       - CGO_ENABLED=0
     goos:
