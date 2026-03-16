@@ -1,6 +1,6 @@
 # Tilde CLI
 
-A command-line interface for the [Tilde](https://tilde.run) sandbox runtime. Designed to be operated by AI agents first, humans second — every command is explicit, stateless, and returns structured output suitable for programmatic consumption.
+A command-line interface for running sandboxed commands on the [Tilde](https://tilde.run) runtime.
 
 ## Installation
 
@@ -16,36 +16,48 @@ go install github.com/tilderun/tilde-cli/cmd/tilde@latest
 
 ## Configuration
 
-The CLI is configured entirely via environment variables:
-
-| Variable | Default | Description |
-|---|---|---|
-| `TILDE_API_KEY` | *(required)* | API key (must start with `tuk-`, `trk-`, or `tak-`) |
-| `TILDE_ENDPOINT_URL` | `https://tilde.run` | Base URL for the Tilde API |
+Set your API key to get started:
 
 ```bash
 export TILDE_API_KEY=tuk-your-key-here
 ```
 
-## Commands
+| Variable | Default | Description |
+|---|---|---|
+| `TILDE_API_KEY` | *(required)* | Your Tilde API key |
+| `TILDE_ENDPOINT_URL` | `https://tilde.run` | Base URL for the Tilde API |
 
-### Run a sandbox
+## Quick Start
+
+### Execute a command
+
+Use `tilde exec` to run a command in a sandbox, stream its output, and exit with the sandbox's exit code:
 
 ```bash
-# Run a command in a sandbox and stream output
-tilde sandbox run -r organization/repository --image alpine -- echo hello
+# Run a command and stream output
+tilde exec organization/repository -- ls -la
 
-# Run in detached mode (print sandbox ID and exit)
-tilde sandbox run -r organization/repository --image alpine -d -- echo hello
+# Use a specific container image
+tilde exec organization/repository --image python:3.12 -- python script.py
 
-# Run with environment variables and a timeout
-tilde sandbox run -r organization/repository --image alpine -e FOO=bar --timeout 300 -- ./script.sh
+# Pass environment variables and set a timeout
+tilde exec organization/repository --image alpine -e FOO=bar --timeout 5m -- ./script.sh
 ```
+
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `--image` | Container image (default: `busybox:latest`) |
+| `-e, --env` | Environment variable in `KEY=VALUE` format (repeatable) |
+| `--timeout` | Sandbox timeout (`30s`, `5m`, `1h`) |
 
 ### Interactive shell
 
+Use `tilde shell` to get a fully interactive terminal session inside a sandbox:
+
 ```bash
-# Start an interactive shell
+# Start a shell
 tilde shell organization/repository
 
 # Start with a specific image
@@ -55,15 +67,26 @@ tilde shell organization/repository --image ubuntu:latest
 tilde shell organization/repository -- /bin/sh -l
 ```
 
-### Execute a command
+`tilde shell` supports the same `--image`, `--env`, and `--timeout` flags as `tilde exec`.
+
+## Advanced Usage
+
+### `tilde sandbox run`
+
+A lower-level command with full control over sandbox lifecycle:
 
 ```bash
-# Run a command non-interactively, stream output, exit with sandbox's exit code
-tilde exec organization/repository -- ls -la
+# Run and stream output (like exec)
+tilde sandbox run -r organization/repository --image alpine -- echo hello
 
-# With a custom image
-tilde exec organization/repository --image python:3.12 -- python script.py
+# Detached mode — prints the sandbox ID and exits immediately
+tilde sandbox run -r organization/repository --image alpine -d -- echo hello
+
+# Interactive mode (like shell)
+tilde sandbox run -r organization/repository --image alpine -i -- /bin/sh
 ```
+
+Additional flags: `-d` (detach), `-i` (interactive), `--mountpoint`, `--path-prefix`.
 
 ### Sandbox management
 
@@ -71,31 +94,19 @@ tilde exec organization/repository --image python:3.12 -- python script.py
 # View sandbox logs
 tilde sandbox logs -r organization/repository SANDBOX_ID
 
-# Follow logs
+# Follow logs in real time
 tilde sandbox logs -f -r organization/repository SANDBOX_ID
 
-# Get sandbox details
+# Get sandbox details (status, exit code, timestamps)
 tilde sandbox info -r organization/repository SANDBOX_ID
 ```
 
 ### List repositories
 
 ```bash
-# List all accessible repositories
 tilde repository ls
-
-# List repositories in a specific organization
 tilde repository ls my-organization
 ```
-
-## Agent Usage
-
-This CLI is optimized for non-interactive, automated use:
-
-- **No prompts** — all required inputs are flags or arguments; missing values produce immediate errors
-- **Structured errors** — API errors include the HTTP status, error code, and request ID for debugging
-- **Exit codes** — `0` for success, non-zero mirrors the sandbox exit code
-- **Stdout/stderr separation** — sandbox output goes to stdout, errors go to stderr
 
 ## License
 
