@@ -7,9 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 
 	"github.com/gorilla/websocket"
 	"golang.org/x/term"
@@ -131,9 +129,9 @@ func attachTerminal(ctx context.Context, wsURL, apiKey string) (int, error) {
 		}
 	}()
 
-	// SIGWINCH → ws
+	// SIGWINCH → ws (unix only; no-op on Windows)
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGWINCH)
+	notifyResize(sigCh)
 	go func() {
 		for {
 			select {
