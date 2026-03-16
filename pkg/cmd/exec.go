@@ -2,9 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"io"
-	"os"
-	"time"
 
 	"github.com/tilderun/tilde-cli/pkg/api"
 	"github.com/spf13/cobra"
@@ -55,37 +52,7 @@ func newExecCmd() *cobra.Command {
 				EnvVars:        envMap,
 			}
 
-			resp, err := apiClient.CreateSandbox(cmd.Context(), org, repo, req)
-			if err != nil {
-				return err
-			}
-
-			ctx := cmd.Context()
-			rc, err := apiClient.StreamSandboxOutput(ctx, org, repo, resp.SandboxID, "combined")
-			if err != nil {
-				return fmt.Errorf("streaming output: %w", err)
-			}
-			_, _ = io.Copy(os.Stdout, rc)
-			rc.Close()
-
-			// Poll for final status
-			for {
-				status, err := apiClient.GetSandboxStatus(ctx, org, repo, resp.SandboxID)
-				if err != nil {
-					return fmt.Errorf("getting sandbox status: %w", err)
-				}
-				switch status.Status {
-				case "committed", "awaiting_approval", "failed", "cancelled":
-					if status.ExitCode != nil {
-						os.Exit(*status.ExitCode)
-					}
-					if status.Status == "failed" {
-						os.Exit(1)
-					}
-					return nil
-				}
-				time.Sleep(time.Second)
-			}
+			return runAndStream(cmd, org, repo, req)
 		},
 	}
 

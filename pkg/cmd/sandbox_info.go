@@ -32,27 +32,28 @@ func newSandboxInfoCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("ID:          %s\n", sb.ID)
-			fmt.Printf("Status:      %s\n", sb.Status)
+			w := cmd.OutOrStdout()
+			fmt.Fprintf(w, "ID:          %s\n", sb.ID)
+			fmt.Fprintf(w, "Status:      %s\n", sb.Status)
 			if sb.StatusReason != "" {
-				fmt.Printf("Reason:      %s\n", sb.StatusReason)
+				fmt.Fprintf(w, "Reason:      %s\n", sb.StatusReason)
 			}
 			if sb.ExitCode != nil {
-				fmt.Printf("Exit Code:   %d\n", *sb.ExitCode)
+				fmt.Fprintf(w, "Exit Code:   %d\n", *sb.ExitCode)
 			}
-			fmt.Printf("Image:       %s\n", sb.Image)
+			fmt.Fprintf(w, "Image:       %s\n", sb.Image)
 			if len(sb.Command) > 0 {
-				fmt.Printf("Command:     %s\n", strings.Join(sb.Command, " "))
+				fmt.Fprintf(w, "Command:     %s\n", strings.Join(sb.Command, " "))
 			}
 			if sb.CommitID != "" {
-				fmt.Printf("Commit ID:   %s\n", sb.CommitID)
+				fmt.Fprintf(w, "Commit ID:   %s\n", sb.CommitID)
 			}
-			fmt.Printf("Created At:  %s\n", sb.CreatedAt.Format("2006-01-02 15:04:05 UTC"))
+			fmt.Fprintf(w, "Created At:  %s\n", sb.CreatedAt.Format("2006-01-02 15:04:05 UTC"))
 			if sb.FinishedAt != nil {
-				fmt.Printf("Finished At: %s\n", sb.FinishedAt.Format("2006-01-02 15:04:05 UTC"))
+				fmt.Fprintf(w, "Finished At: %s\n", sb.FinishedAt.Format("2006-01-02 15:04:05 UTC"))
 			}
 			if sb.ErrorMessage != "" {
-				fmt.Printf("Error:       %s\n", sb.ErrorMessage)
+				fmt.Fprintf(w, "Error:       %s\n", sb.ErrorMessage)
 			}
 
 			return nil

@@ -61,6 +61,7 @@ func (p *Pool) Submit(fn func(ctx context.Context) error) {
 // Wait blocks until all submitted tasks complete and returns the first error (if any).
 func (p *Pool) Wait() error {
 	p.wg.Wait()
+	p.cancel()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.err

@@ -1,12 +1,11 @@
 package cmd
 
 import (
-	"os"
 	"testing"
 )
 
 func TestRootCmd_MissingAPIKey(t *testing.T) {
-	os.Unsetenv("TILDE_API_KEY")
+	t.Setenv("TILDE_API_KEY", "")
 
 	root := NewRootCmd()
 	root.SetArgs([]string{"repository", "ls"})
@@ -91,7 +90,7 @@ func TestRootCmd_HasAllSubcommands(t *testing.T) {
 }
 
 func TestRootCmd_HelpDoesNotRequireAPIKey(t *testing.T) {
-	os.Unsetenv("TILDE_API_KEY")
+	t.Setenv("TILDE_API_KEY", "")
 
 	root := NewRootCmd()
 	root.SetArgs([]string{"--help"})

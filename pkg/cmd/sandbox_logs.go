@@ -25,14 +25,18 @@ func newSandboxLogsCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_ = follow // follow behavior is default — server streams until sandbox finishes
 			org, repo, err := parseRepoFlag(repoFlag)
 			if err != nil {
 				return err
 			}
 			sandboxID := args[0]
 
-			rc, err := apiClient.StreamSandboxOutput(cmd.Context(), org, repo, sandboxID, "combined")
+			var rc io.ReadCloser
+			if follow {
+				rc, err = apiClient.StreamSandboxOutput(cmd.Context(), org, repo, sandboxID, "combined")
+			} else {
+				rc, err = apiClient.GetSandboxOutput(cmd.Context(), org, repo, sandboxID, "combined")
+			}
 			if err != nil {
 				return err
 			}
@@ -44,7 +48,7 @@ func newSandboxLogsCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&repoFlag, "repository", "r", "", "Repository (organization/repository)")
-	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow log output (default behavior)")
+	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow log output")
 	_ = cmd.MarkFlagRequired("repository")
 
 	return cmd

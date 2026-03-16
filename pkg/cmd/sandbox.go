@@ -68,12 +68,11 @@ Use -i/--interactive to attach an interactive terminal.`,
 				if err != nil {
 					return err
 				}
-				fmt.Println(resp.SandboxID)
+				fmt.Fprintln(cmd.OutOrStdout(), resp.SandboxID)
 				return nil
 			}
 
 			if interactive {
-				req.Interactive = true
 				resp, err := apiClient.CreateSandbox(cmd.Context(), org, repo, req)
 				if err != nil {
 					return err
@@ -141,7 +140,11 @@ func runAndStream(cmd *cobra.Command, org, repo string, req api.CreateSandboxReq
 			}
 			return nil
 		}
-		time.Sleep(time.Second)
+		select {
+		case <-time.After(time.Second):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
@@ -158,6 +161,10 @@ func waitForRunning(ctx context.Context, org, repo, sandboxID string) error {
 		case "committed", "awaiting_approval", "failed", "cancelled":
 			return fmt.Errorf("sandbox reached terminal state %q before becoming ready", status.Status)
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-time.After(500 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }

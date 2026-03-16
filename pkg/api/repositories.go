@@ -27,7 +27,7 @@ func (c *Client) ListRepositories(ctx context.Context, org string, params ListRe
 
 	var path string
 	if org != "" {
-		path = fmt.Sprintf("/organizations/%s/repositories?%s", org, qp.Encode())
+		path = fmt.Sprintf("/organizations/%s/repositories?%s", url.PathEscape(org), qp.Encode())
 	} else {
 		path = fmt.Sprintf("/repositories?%s", qp.Encode())
 	}

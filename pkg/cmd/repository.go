@@ -32,6 +32,7 @@ func newRepositoryLsCmd() *cobra.Command {
 				Amount: 1000,
 			}
 
+			w := cmd.OutOrStdout()
 			for {
 				resp, err := apiClient.ListRepositories(cmd.Context(), org, params)
 				if err != nil {
@@ -39,7 +40,7 @@ func newRepositoryLsCmd() *cobra.Command {
 				}
 
 				for _, repo := range resp.Results {
-					fmt.Printf("%s/%s\n", repo.OrganizationSlug, repo.Name)
+					fmt.Fprintf(w, "%s/%s\n", repo.OrganizationSlug, repo.Name)
 				}
 
 				if !resp.Pagination.HasMore {

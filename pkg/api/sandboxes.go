@@ -71,6 +71,18 @@ func (c *Client) StreamSandboxOutput(ctx context.Context, org, repo, sandboxID, 
 	return resp.Body, nil
 }
 
+// GetSandboxOutput fetches sandbox output as a snapshot using the regular HTTP client (with timeout).
+// The caller must close the returned ReadCloser.
+func (c *Client) GetSandboxOutput(ctx context.Context, org, repo, sandboxID, stream string) (io.ReadCloser, error) {
+	path := fmt.Sprintf("/organizations/%s/repositories/%s/sandboxes/%s/%s",
+		url.PathEscape(org), url.PathEscape(repo), url.PathEscape(sandboxID), url.PathEscape(stream))
+	resp, err := c.doRaw(ctx, http.MethodGet, path, nil, "")
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
+}
+
 // TerminalWebSocketURL constructs the WebSocket URL for terminal attachment.
 func (c *Client) TerminalWebSocketURL(org, repo, sandboxID string) string {
 	wsBase := strings.Replace(c.BaseURL, "https://", "wss://", 1)
