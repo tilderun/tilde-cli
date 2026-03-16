@@ -94,7 +94,7 @@ Use -i/--interactive to attach an interactive terminal.`,
 		},
 	}
 
-	cmd.Flags().StringVarP(&repoFlag, "repo", "r", "", "Repository (organization/repository)")
+	cmd.Flags().StringVarP(&repoFlag, "repository", "r", "", "Repository (organization/repository)")
 	cmd.Flags().StringVar(&image, "image", "", "Container image")
 	cmd.Flags().IntVar(&timeout, "timeout", 0, "Timeout in seconds")
 	cmd.Flags().StringArrayVarP(&envVars, "env", "e", nil, "Environment variables (KEY=VALUE)")
@@ -103,7 +103,7 @@ Use -i/--interactive to attach an interactive terminal.`,
 	cmd.Flags().StringVar(&mountpoint, "mountpoint", "", "Mount point for repository data")
 	cmd.Flags().StringVar(&pathPrefix, "path-prefix", "", "Path prefix for repository data")
 
-	_ = cmd.MarkFlagRequired("repo")
+	_ = cmd.MarkFlagRequired("repository")
 	_ = cmd.MarkFlagRequired("image")
 
 	return cmd

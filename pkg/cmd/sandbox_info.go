@@ -59,8 +59,8 @@ func newSandboxInfoCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&repoFlag, "repo", "r", "", "Repository (organization/repository)")
-	_ = cmd.MarkFlagRequired("repo")
+	cmd.Flags().StringVarP(&repoFlag, "repository", "r", "", "Repository (organization/repository)")
+	_ = cmd.MarkFlagRequired("repository")
 
 	return cmd
 }

@@ -43,9 +43,9 @@ func newSandboxLogsCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&repoFlag, "repo", "r", "", "Repository (organization/repository)")
+	cmd.Flags().StringVarP(&repoFlag, "repository", "r", "", "Repository (organization/repository)")
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow log output (default behavior)")
-	_ = cmd.MarkFlagRequired("repo")
+	_ = cmd.MarkFlagRequired("repository")
 
 	return cmd
 }
