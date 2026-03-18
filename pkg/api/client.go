@@ -75,8 +75,8 @@ func (c *Client) doStream(ctx context.Context, method, path string, body io.Read
 	return resp, nil
 }
 
-// doJSON executes an API request and decodes the JSON response.
-func (c *Client) doJSON(ctx context.Context, method, path string, reqBody, respBody any) (*http.Response, error) {
+// DoJSON executes an API request and decodes the JSON response.
+func (c *Client) DoJSON(ctx context.Context, method, path string, reqBody, respBody any) (*http.Response, error) {
 	var body io.Reader
 	if reqBody != nil {
 		data, err := json.Marshal(reqBody)

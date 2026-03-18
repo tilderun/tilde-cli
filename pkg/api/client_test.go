@@ -116,7 +116,7 @@ func TestClient_doJSON_Success(t *testing.T) {
 	c := NewClient(srv.URL, "tuk-key")
 
 	var resp CreateSandboxResponse
-	_, err := c.doJSON(context.Background(), http.MethodPost, "/sandboxes", nil, &resp)
+	_, err := c.DoJSON(context.Background(), http.MethodPost, "/sandboxes", nil, &resp)
 	if err != nil {
 		t.Fatalf("doJSON: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestClient_doJSON_WithRequestBody(t *testing.T) {
 	reqBody := &CreateSandboxRequest{Image: "alpine", Command: []string{"echo", "hello"}}
 
 	var resp CreateSandboxResponse
-	_, err := c.doJSON(context.Background(), http.MethodPost, "/sandboxes", reqBody, &resp)
+	_, err := c.DoJSON(context.Background(), http.MethodPost, "/sandboxes", reqBody, &resp)
 	if err != nil {
 		t.Fatalf("doJSON: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestClient_doJSON_APIError(t *testing.T) {
 
 	c := NewClient(srv.URL, "tuk-key")
 	var resp CreateSandboxResponse
-	_, err := c.doJSON(context.Background(), http.MethodPost, "/sandboxes", nil, &resp)
+	_, err := c.DoJSON(context.Background(), http.MethodPost, "/sandboxes", nil, &resp)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -189,7 +189,7 @@ func TestClient_doJSON_NoContent(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "tuk-key")
-	_, err := c.doJSON(context.Background(), http.MethodDelete, "/something", nil, nil)
+	_, err := c.DoJSON(context.Background(), http.MethodDelete, "/something", nil, nil)
 	if err != nil {
 		t.Fatalf("doJSON with 204: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestClient_doJSON_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	_, err := c.doJSON(ctx, http.MethodGet, "/test", nil, nil)
+	_, err := c.DoJSON(ctx, http.MethodGet, "/test", nil, nil)
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
 	}
