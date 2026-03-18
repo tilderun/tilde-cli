@@ -33,7 +33,7 @@ func (c *Client) ListRepositories(ctx context.Context, org string, params ListRe
 	}
 
 	var resp ListRepositoriesResponse
-	_, err := c.doJSON(ctx, http.MethodGet, path, nil, &resp)
+	_, err := c.DoJSON(ctx, http.MethodGet, path, nil, &resp)
 	if err != nil {
 		return nil, err
 	}

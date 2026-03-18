@@ -13,7 +13,7 @@ import (
 func (c *Client) CreateSandbox(ctx context.Context, org, repo string, req CreateSandboxRequest) (*CreateSandboxResponse, error) {
 	path := fmt.Sprintf("/organizations/%s/repositories/%s/sandboxes", url.PathEscape(org), url.PathEscape(repo))
 	var resp CreateSandboxResponse
-	_, err := c.doJSON(ctx, http.MethodPost, path, &req, &resp)
+	_, err := c.DoJSON(ctx, http.MethodPost, path, &req, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -25,7 +25,7 @@ func (c *Client) GetSandbox(ctx context.Context, org, repo, sandboxID string) (*
 	path := fmt.Sprintf("/organizations/%s/repositories/%s/sandboxes/%s",
 		url.PathEscape(org), url.PathEscape(repo), url.PathEscape(sandboxID))
 	var resp Sandbox
-	_, err := c.doJSON(ctx, http.MethodGet, path, nil, &resp)
+	_, err := c.DoJSON(ctx, http.MethodGet, path, nil, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func (c *Client) GetSandboxStatus(ctx context.Context, org, repo, sandboxID stri
 	path := fmt.Sprintf("/organizations/%s/repositories/%s/sandboxes/%s/status",
 		url.PathEscape(org), url.PathEscape(repo), url.PathEscape(sandboxID))
 	var resp SandboxStatusResponse
-	_, err := c.doJSON(ctx, http.MethodGet, path, nil, &resp)
+	_, err := c.DoJSON(ctx, http.MethodGet, path, nil, &resp)
 	if err != nil {
 		return nil, err
 	}

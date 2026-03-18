@@ -430,6 +430,72 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  # --- Device Authorization ---
+  /auth/device/code:
+    post:
+      tags: [Auth]
+      summary: Request a device authorization code
+      operationId: deviceRequestCode
+      security: []
+      responses:
+        '200':
+          description: Device authorization code issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCodeResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/device/token:
+    post:
+      tags: [Auth]
+      summary: Poll for device authorization token
+      operationId: deviceToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceTokenRequest'
+      responses:
+        '200':
+          description: Token issued or authorization still pending
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/device/confirm:
+    post:
+      tags: [Auth]
+      summary: Confirm a device authorization code
+      operationId: deviceConfirm
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceConfirmRequest'
+      responses:
+        '200':
+          description: Device authorization confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                additionalProperties: false
+                properties:
+                  status:
+                    type: string
+                    enum: [confirmed]
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # --- Cross-org repositories ---
   /repositories:
     get:
@@ -3684,6 +3750,60 @@ components:
         invite_code:
           type: string
           description: Hex-encoded HMAC-SHA256 invite token (required when server is in invite-only mode)
+
+    DeviceCodeResponse:
+      type: object
+      required: [device_code, user_code, verification_uri, verification_uri_complete, expires_in, interval]
+      additionalProperties: false
+      properties:
+        device_code:
+          type: string
+          description: The device verification code
+        user_code:
+          type: string
+          description: The end-user verification code
+        verification_uri:
+          type: string
+          description: The end-user verification URI
+        verification_uri_complete:
+          type: string
+          description: Verification URI with the user code pre-filled
+        expires_in:
+          type: integer
+          description: Lifetime in seconds of the device code
+        interval:
+          type: integer
+          description: Minimum polling interval in seconds
+
+    DeviceTokenRequest:
+      type: object
+      required: [device_code]
+      additionalProperties: false
+      properties:
+        device_code:
+          type: string
+          description: The device verification code to poll
+
+    DeviceConfirmRequest:
+      type: object
+      required: [user_code]
+      additionalProperties: false
+      properties:
+        user_code:
+          type: string
+          description: The end-user verification code to confirm
+
+    DeviceTokenResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        access_token:
+          type: string
+          description: The access token, present when authorization is complete
+        error:
+          type: string
+          enum: [authorization_pending, slow_down]
+          description: Error code when the authorization is not yet complete
 
     User:
       type: object
