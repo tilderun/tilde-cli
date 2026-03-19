@@ -29,8 +29,10 @@ type deviceTokenResponse struct {
 }
 
 type authMeResponse struct {
-	Username string `json:"username"`
-	Email    string `json:"email"`
+	User struct {
+		Username string `json:"username"`
+		Email    string `json:"email"`
+	} `json:"user"`
 }
 
 func newAuthCmd() *cobra.Command {
@@ -206,7 +208,7 @@ func runAuthStatus(ctx context.Context) error {
 		return nil
 	}
 
-	fmt.Printf("Logged in as %s (%s)\n", me.Username, me.Email)
+	fmt.Printf("Logged in as %s (%s)\n", me.User.Username, me.User.Email)
 	return nil
 }
 
