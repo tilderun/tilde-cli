@@ -28,9 +28,12 @@ func TestAuthStatus_NotLoggedIn(t *testing.T) {
 func TestAuthStatus_LoggedIn(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/auth/me" && r.Method == http.MethodGet {
-			json.NewEncoder(w).Encode(authMeResponse{
-				Username: "testuser",
-				Email:    "test@example.com",
+			json.NewEncoder(w).Encode(map[string]any{
+				"user": map[string]any{
+					"username": "testuser",
+					"email":    "test@example.com",
+				},
+				"organizations": []any{},
 			})
 			return
 		}

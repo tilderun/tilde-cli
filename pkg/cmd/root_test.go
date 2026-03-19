@@ -6,6 +6,7 @@ import (
 
 func TestRootCmd_MissingAPIKey(t *testing.T) {
 	t.Setenv("TILDE_API_KEY", "")
+	t.Setenv("HOME", t.TempDir())
 
 	root := NewRootCmd()
 	root.SetArgs([]string{"repository", "ls"})
@@ -20,6 +21,7 @@ func TestRootCmd_MissingAPIKey(t *testing.T) {
 
 func TestRootCmd_InvalidAPIKeyPrefix(t *testing.T) {
 	t.Setenv("TILDE_API_KEY", "bad-prefix-key")
+	t.Setenv("HOME", t.TempDir())
 
 	root := NewRootCmd()
 	root.SetArgs([]string{"repository", "ls"})
@@ -81,7 +83,7 @@ func TestRootCmd_HasAllSubcommands(t *testing.T) {
 		subcommands[cmd.Name()] = true
 	}
 
-	expected := []string{"sandbox", "repository", "shell", "exec"}
+	expected := []string{"sandbox", "repository", "shell", "exec", "auth"}
 	for _, name := range expected {
 		if !subcommands[name] {
 			t.Errorf("missing subcommand %q", name)
@@ -91,6 +93,7 @@ func TestRootCmd_HasAllSubcommands(t *testing.T) {
 
 func TestRootCmd_HelpDoesNotRequireAPIKey(t *testing.T) {
 	t.Setenv("TILDE_API_KEY", "")
+	t.Setenv("HOME", t.TempDir())
 
 	root := NewRootCmd()
 	root.SetArgs([]string{"--help"})
