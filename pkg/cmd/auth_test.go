@@ -20,8 +20,8 @@ func TestAuthStatus_NotLoggedIn(t *testing.T) {
 
 	root := NewRootCmd()
 	root.SetArgs([]string{"auth", "status"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("auth status: %v", err)
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected error for unauthenticated status")
 	}
 }
 
