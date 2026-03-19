@@ -195,7 +195,7 @@ func runAuthStatus(ctx context.Context) error {
 	apiKey, endpoint := resolveAPIKey()
 	if apiKey == "" {
 		fmt.Println("Not logged in.")
-		return nil
+		return fmt.Errorf("not logged in")
 	}
 
 	baseURL := strings.TrimRight(endpoint, "/") + "/api/v1"
@@ -205,7 +205,7 @@ func runAuthStatus(ctx context.Context) error {
 	_, err := client.DoJSON(ctx, http.MethodGet, "/auth/me", nil, &me)
 	if err != nil {
 		fmt.Println("Not logged in (invalid or expired token).")
-		return nil
+		return fmt.Errorf("not logged in")
 	}
 
 	fmt.Printf("Logged in as %s (%s)\n", me.User.Username, me.User.Email)
