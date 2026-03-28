@@ -1981,15 +1981,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, rego]
+              required: [name, policy_text]
               properties:
                 name:
                   type: string
                 description:
                   type: string
-                rego:
+                policy_text:
                   type: string
-                  description: Rego policy document
+                  description: Policy text (simple policy DSL)
       responses:
         '201':
           description: Policy created
@@ -2030,7 +2030,7 @@ paths:
   /organizations/{organization}/policies:validate:
     post:
       tags: [Policies]
-      summary: Validate a Rego policy document without saving
+      summary: Validate a policy document without saving
       operationId: validatePolicy
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -2040,9 +2040,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [rego]
+              required: [policy_text]
               properties:
-                rego:
+                policy_text:
                   type: string
       responses:
         '200':
@@ -2057,7 +2057,7 @@ paths:
   /organizations/{organization}/policies:generate:
     post:
       tags: [Policies]
-      summary: Generate a Rego policy from a natural language prompt using AI
+      summary: Generate a policy from a natural language prompt using AI
       operationId: generatePolicy
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -2075,16 +2075,16 @@ paths:
                   maxLength: 4000
       responses:
         '200':
-          description: Generated Rego policy
+          description: Generated policy
           content:
             application/json:
               schema:
                 type: object
-                required: [rego]
+                required: [policy_text]
                 properties:
-                  rego:
+                  policy_text:
                     type: string
-                    description: Valid Rego policy source code
+                    description: Valid policy source code
         '400':
           $ref: '#/components/responses/BadRequest'
         '429':
@@ -2138,7 +2138,7 @@ paths:
                   type: string
                 description:
                   type: string
-                rego:
+                policy_text:
                   type: string
       responses:
         '200':
@@ -2615,7 +2615,7 @@ paths:
                     type: string
                 inline_policy:
                   type: string
-                  description: Rego policy source to set as the agent's inline policy. Empty string clears it.
+                  description: Policy source to set as the agent's inline policy. Empty string clears it.
       responses:
         '200':
           description: Updated agent
@@ -4380,7 +4380,7 @@ components:
             type: string
         inline_policy:
           type: string
-          description: Rego policy source evaluated inline for this agent
+          description: Policy source evaluated inline for this agent
         inline_policy_updated_at:
           type: string
           format: date-time
@@ -4457,7 +4457,7 @@ components:
           type: string
         description:
           type: string
-        rego:
+        policy_text:
           type: string
         is_builtin:
           type: boolean
