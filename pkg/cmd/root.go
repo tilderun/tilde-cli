@@ -68,8 +68,8 @@ Execute a command:
 
   tilde exec organization/repository -- ls -la`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			// Skip validation for help, completion, and auth commands
-			if cmd.Name() == "help" || cmd.Name() == "completion" {
+			// Skip validation for help, completion, auth, version, and update commands
+			if cmd.Name() == "help" || cmd.Name() == "completion" || cmd.Name() == "version" || cmd.Name() == "update" {
 				return nil
 			}
 			// Skip for auth subcommands — they handle credentials themselves
@@ -123,6 +123,8 @@ Execute a command:
 	root.AddCommand(newExecCmd())
 	root.AddCommand(newRepositoryCmd())
 	root.AddCommand(newAuthCmd())
+	root.AddCommand(newUpdateCmd())
+	root.AddCommand(newVersionCmd())
 
 	return root
 }
