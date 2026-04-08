@@ -58,7 +58,7 @@ func NewRootCmd() *cobra.Command {
 
 Run a sandbox:
 
-  tilde sandbox run -r organization/repository --image alpine -- echo hello
+  tilde sandbox run -r organization/repository --image ubuntu -- echo hello
 
 Get an interactive shell:
 

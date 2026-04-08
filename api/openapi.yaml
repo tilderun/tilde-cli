@@ -4731,7 +4731,7 @@ components:
       properties:
         image:
           type: string
-          description: Docker image to run
+          description: Image ID from the server-configured allowlist (e.g. "python-312", "ubuntu")
         command:
           type: array
           items:
@@ -4915,6 +4915,7 @@ components:
       properties:
         image:
           type: string
+          description: Image ID from the server-configured allowlist (e.g. "python-312", "ubuntu")
         command:
           type: array
           items:
