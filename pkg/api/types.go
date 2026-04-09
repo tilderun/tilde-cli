@@ -65,6 +65,7 @@ type Sandbox struct {
 type SandboxStatusResponse struct {
 	Status       string `json:"status"`
 	StatusReason string `json:"status_reason,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
 	ExitCode     *int   `json:"exit_code,omitempty"`
 	CommitID     string `json:"commit_id,omitempty"`
 	WebURL       string `json:"web_url,omitempty"`

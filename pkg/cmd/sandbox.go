@@ -82,11 +82,11 @@ Use -i/--interactive to attach an interactive terminal.`,
 					return err
 				}
 				wsURL := apiClient.TerminalWebSocketURL(org, repo, resp.SandboxID)
-				exitCode, err := attachTerminal(cmd.Context(), wsURL, apiClient.APIKey)
+				_, err = attachTerminal(cmd.Context(), wsURL, apiClient.APIKey)
 				if err != nil {
 					return err
 				}
-				os.Exit(exitCode)
+				return waitForFinalStatus(cmd.Context(), org, repo, resp.SandboxID)
 			}
 
 			// Default: stream output and wait for exit
@@ -125,19 +125,51 @@ func runAndStream(cmd *cobra.Command, org, repo string, req api.CreateSandboxReq
 	_, _ = io.Copy(os.Stdout, rc)
 	rc.Close()
 
-	// Poll for final status
+	return waitForFinalStatus(ctx, org, repo, resp.SandboxID)
+}
+
+// waitForFinalStatus polls until the sandbox reaches a terminal state and
+// prints the outcome (commit ID, approval URL, failure reason, etc.).
+func waitForFinalStatus(ctx context.Context, org, repo, sandboxID string) error {
 	for {
-		status, err := apiClient.GetSandboxStatus(ctx, org, repo, resp.SandboxID)
+		status, err := apiClient.GetSandboxStatus(ctx, org, repo, sandboxID)
 		if err != nil {
 			return fmt.Errorf("getting sandbox status: %w", err)
 		}
 		switch status.Status {
-		case "committed", "awaiting_approval", "failed", "cancelled":
+		case "committed":
+			if status.CommitID != "" {
+				fmt.Fprintf(os.Stderr, "Committed: %s\n", status.CommitID)
+			} else if status.StatusReason == "no_changes" {
+				fmt.Fprintln(os.Stderr, "Done (no changes)")
+			}
 			if status.ExitCode != nil {
 				os.Exit(*status.ExitCode)
 			}
-			if status.Status == "failed" {
-				os.Exit(1)
+			return nil
+		case "awaiting_approval":
+			fmt.Fprintln(os.Stderr, "Commit requires approval")
+			if status.WebURL != "" {
+				fmt.Fprintf(os.Stderr, "Approve at: %s\n", status.WebURL)
+			}
+			if status.ExitCode != nil {
+				os.Exit(*status.ExitCode)
+			}
+			return nil
+		case "failed":
+			if status.ErrorMessage != "" {
+				fmt.Fprintf(os.Stderr, "Failed: %s\n", status.ErrorMessage)
+			} else if status.StatusReason != "" {
+				fmt.Fprintf(os.Stderr, "Failed: %s\n", status.StatusReason)
+			}
+			if status.ExitCode != nil {
+				os.Exit(*status.ExitCode)
+			}
+			os.Exit(1)
+		case "cancelled":
+			fmt.Fprintln(os.Stderr, "Cancelled")
+			if status.ExitCode != nil {
+				os.Exit(*status.ExitCode)
 			}
 			return nil
 		}
