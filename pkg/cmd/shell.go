@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultImage = "ubuntu"
+const defaultImage = "busybox"
 
 func newShellCmd() *cobra.Command {
 	var (

@@ -137,6 +137,41 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
 
+  /auth/validate-invitation-token:
+    get:
+      tags: [Auth]
+      summary: Validate an org invitation token for email mismatch warnings
+      operationId: validateInvitationToken
+      security: []
+      parameters:
+        - name: email
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Token validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [match]
+                properties:
+                  match:
+                    type: boolean
+                  invited_email_hint:
+                    type: string
+                  organization_display_name:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /auth/search-users:
     get:
       tags: [Auth]
@@ -379,8 +414,6 @@ paths:
                   pattern: '^[a-z0-9][a-z0-9_-]{1,38}$'
                 company:
                   type: string
-                invite_code:
-                  type: string
       responses:
         '201':
           description: User created successfully
@@ -391,7 +424,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
-          description: Invalid nonce or invite code required
+          description: Invalid nonce or account pending approval
           content:
             application/json:
               schema:
@@ -517,6 +550,77 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  # --- User Invitations ---
+  /invitations:
+    get:
+      tags: [Invitations]
+      summary: List pending org invitations for the current user
+      operationId: listMyInvitations
+      responses:
+        '200':
+          description: Pending invitations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InvitationWithDetails'
+
+  /invitations/{invitation_id}/accept:
+    post:
+      tags: [Invitations]
+      summary: Accept an org invitation
+      operationId: acceptMyInvitation
+      parameters:
+        - name: invitation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Invitation accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Invitation expired or revoked
+
+  /invitations/{invitation_id}/decline:
+    post:
+      tags: [Invitations]
+      summary: Decline an org invitation
+      operationId: declineMyInvitation
+      parameters:
+        - name: invitation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Invitation declined
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # --- Organizations ---
   /organizations:
     post:
@@ -557,6 +661,35 @@ paths:
                     items:
                       $ref: '#/components/schemas/Organization'
 
+  /organizations/check-name:
+    get:
+      tags: [Organizations]
+      summary: Check if an organization name is valid and available
+      operationId: checkOrgName
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Availability result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available, reason]
+                additionalProperties: false
+                properties:
+                  available:
+                    type: boolean
+                  reason:
+                    type: string
+                    enum: ['', invalid, reserved, taken]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
   /organizations/{organization}:
     get:
       tags: [Organizations]
@@ -593,25 +726,6 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Membership'
-    post:
-      tags: [Organizations]
-      summary: Add a member to the organization
-      operationId: addMember
-      parameters:
-        - $ref: '#/components/parameters/Organization'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AddMemberRequest'
-      responses:
-        '201':
-          description: Member added
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          $ref: '#/components/responses/Conflict'
 
   /organizations/{organization}/members/{user_id}:
     delete:
@@ -631,6 +745,95 @@ paths:
           description: Member removed
         '404':
           $ref: '#/components/responses/NotFound'
+
+  # --- Organization Invitations ---
+  /organizations/{organization}/invitations:
+    post:
+      tags: [Organizations]
+      summary: Invite a user to the organization by email or username
+      operationId: createOrgInvitation
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: Email of the invitee. Required when username is not provided.
+                username:
+                  type: string
+                  description: Username of an existing user to invite. The invitation is keyed to that user's email.
+                group_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Optional groups to add the invited user to on accept. Attached to the invitation principal immediately; rewritten to the user on accept.
+                policy_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Optional policies to attach to the invited user on accept. Attached to the invitation principal immediately; rewritten to the user on accept.
+      responses:
+        '201':
+          description: Invitation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Username was provided and does not match an existing user
+        '409':
+          description: User already a member or duplicate pending invitation
+    get:
+      tags: [Organizations]
+      summary: List pending invitations for the organization
+      operationId: listOrgInvitations
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+      responses:
+        '200':
+          description: Pending invitations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Invitation'
+
+  /organizations/{organization}/invitations/{invitation_id}:
+    delete:
+      tags: [Organizations]
+      summary: Revoke an organization invitation
+      operationId: revokeOrgInvitation
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - name: invitation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Invitation revoked
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Invitation is not in pending status
 
   # --- Repositories ---
   /organizations/{organization}/repositories:
@@ -3148,6 +3351,31 @@ paths:
         '410':
           description: Logs have been evicted
 
+  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/network:
+    get:
+      tags: [Sandboxes]
+      summary: Stream sandbox network request logs
+      description: >
+        JSON-lines stream of every outbound HTTP request made by the sandbox,
+        including the proxy decision (allow/deny) and upstream response metadata
+        when the request was allowed.
+      operationId: getSandboxNetwork
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SandboxID'
+      responses:
+        '200':
+          description: Network request log stream (application/x-ndjson)
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Logs have been evicted
+
   /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/terminal:
     get:
       tags: [Sandboxes]
@@ -3706,6 +3934,43 @@ components:
         pattern: '^[A-Za-z_][A-Za-z0-9_-]{0,255}$'
 
   schemas:
+    Invitation:
+      type: object
+      required: [id, organization_id, email, invited_by, status, created_at, expires_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        invited_by:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, accepted, declined, revoked, expired]
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+
+    InvitationWithDetails:
+      allOf:
+        - $ref: '#/components/schemas/Invitation'
+        - type: object
+          properties:
+            organization_name:
+              type: string
+            organization_display_name:
+              type: string
+            inviter_name:
+              type: string
+
     Error:
       type: object
       required: [message, code, request_id]
@@ -3747,9 +4012,6 @@ components:
           minLength: 8
         company:
           type: string
-        invite_code:
-          type: string
-          description: Hex-encoded HMAC-SHA256 invite token (required when server is in invite-only mode)
 
     DeviceCodeResponse:
       type: object
@@ -3807,7 +4069,7 @@ components:
 
     User:
       type: object
-      required: [id, username, email, full_name, source, created_at]
+      required: [id, username, email, full_name, source, status, created_at]
       additionalProperties: false
       properties:
         id:
@@ -3823,6 +4085,10 @@ components:
           type: string
         source:
           type: string
+        status:
+          type: string
+          enum: [pending, active]
+          description: Account status. Pending accounts cannot sign in until an admin approves them.
         created_at:
           type: string
           format: date-time
@@ -3942,13 +4208,6 @@ components:
         joined_at:
           type: string
           format: date-time
-
-    AddMemberRequest:
-      type: object
-      required: [username]
-      properties:
-        username:
-          type: string
 
     OrgSummary:
       type: object
