@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 	"golang.org/x/term"
@@ -30,15 +31,19 @@ type resizeFrame struct {
 	Rows int `json:"rows"`
 }
 
-// attachTerminal connects to a sandbox terminal via WebSocket and provides an interactive session.
-func attachTerminal(ctx context.Context, wsURL, apiKey string) (int, error) {
+// attachTerminal connects to a sandbox terminal via WebSocket and provides
+// an interactive session. Returns the exit code (if the server sent an exit
+// frame), a `dropped` flag (true when the WebSocket read side errored,
+// indicating a connection drop rather than a clean client-side exit), and
+// any terminal error from dial/raw-mode setup.
+func attachTerminal(ctx context.Context, wsURL, apiKey string) (int, bool, error) {
 	dialer := websocket.Dialer{}
 	headers := http.Header{}
 	headers.Set("Authorization", "Bearer "+apiKey)
 
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
 	if err != nil {
-		return 1, fmt.Errorf("connecting to terminal: %w", err)
+		return 1, true, fmt.Errorf("connecting to terminal: %w", err)
 	}
 	defer conn.Close()
 
@@ -46,9 +51,11 @@ func attachTerminal(ctx context.Context, wsURL, apiKey string) (int, error) {
 	fd := int(os.Stdin.Fd())
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
-		return 1, fmt.Errorf("setting raw terminal mode: %w", err)
+		return 1, false, fmt.Errorf("setting raw terminal mode: %w", err)
 	}
 	defer term.Restore(fd, oldState)
+
+	var dropped atomic.Bool
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -88,6 +95,7 @@ func attachTerminal(ctx context.Context, wsURL, apiKey string) (int, error) {
 		for {
 			_, reader, err := conn.NextReader()
 			if err != nil {
+				dropped.Store(true)
 				cancel()
 				return
 			}
@@ -95,6 +103,7 @@ func attachTerminal(ctx context.Context, wsURL, apiKey string) (int, error) {
 			// Read the first byte (frame type)
 			var typeBuf [1]byte
 			if _, err := io.ReadFull(reader, typeBuf[:]); err != nil {
+				dropped.Store(true)
 				cancel()
 				return
 			}
@@ -103,6 +112,7 @@ func attachTerminal(ctx context.Context, wsURL, apiKey string) (int, error) {
 			case frameTypeData:
 				// Stream directly to stdout without buffering the entire message
 				if _, err := io.Copy(os.Stdout, reader); err != nil {
+					dropped.Store(true)
 					cancel()
 					return
 				}
@@ -153,9 +163,9 @@ func attachTerminal(ctx context.Context, wsURL, apiKey string) (int, error) {
 
 	select {
 	case code := <-exitCodeCh:
-		return code, nil
+		return code, false, nil
 	default:
-		return 0, nil
+		return 0, dropped.Load(), nil
 	}
 }
 

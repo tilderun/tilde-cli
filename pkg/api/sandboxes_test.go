@@ -126,15 +126,15 @@ func TestGetSandboxStatus(t *testing.T) {
 
 func TestStreamSandboxOutput(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/combined") {
-			t.Errorf("path = %s, want /combined suffix", r.URL.Path)
+		if !strings.HasSuffix(r.URL.Path, "/logs/stdout") {
+			t.Errorf("path = %s, want /logs/stdout suffix", r.URL.Path)
 		}
 		w.Write([]byte("hello from sandbox\n"))
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "tuk-key")
-	rc, err := c.StreamSandboxOutput(context.Background(), "org", "repo", "sb-123", "combined")
+	rc, err := c.StreamSandboxOutput(context.Background(), "org", "repo", "sb-123", "stdout")
 	if err != nil {
 		t.Fatalf("StreamSandboxOutput: %v", err)
 	}
@@ -161,5 +161,34 @@ func TestTerminalWebSocketURL_HTTP(t *testing.T) {
 	want := "ws://localhost:8080/api/v1/organizations/org/repositories/repo/sandboxes/sb-1/terminal"
 	if got != want {
 		t.Errorf("TerminalWebSocketURL = %q, want %q", got, want)
+	}
+}
+
+func TestSandboxStatusHelpers(t *testing.T) {
+	tests := []struct {
+		status      string
+		terminal    bool
+		attachable  bool
+		logsAvail   bool
+	}{
+		{SandboxStatusStarting, false, false, false},
+		{SandboxStatusRunning, false, true, true},
+		{SandboxStatusCommitted, true, false, true},
+		{SandboxStatusAwaitingApproval, true, false, true},
+		{SandboxStatusFailed, true, false, true},
+		{SandboxStatusCancelled, true, false, true},
+		{"", false, false, false},
+	}
+	for _, tt := range tests {
+		s := &SandboxStatusResponse{Status: tt.status}
+		if got := s.IsTerminal(); got != tt.terminal {
+			t.Errorf("status %q IsTerminal = %v, want %v", tt.status, got, tt.terminal)
+		}
+		if got := s.IsAttachable(); got != tt.attachable {
+			t.Errorf("status %q IsAttachable = %v, want %v", tt.status, got, tt.attachable)
+		}
+		if got := s.LogsAvailable(); got != tt.logsAvail {
+			t.Errorf("status %q LogsAvailable = %v, want %v", tt.status, got, tt.logsAvail)
+		}
 	}
 }

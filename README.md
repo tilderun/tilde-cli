@@ -38,10 +38,10 @@ Use `tilde exec` to run a command in a sandbox, stream its output, and exit with
 tilde exec organization/repository -- ls -la
 
 # Use a specific container image
-tilde exec organization/repository --image python:3.12 -- python script.py
+tilde exec organization/repository --image python-3.12 -- python script.py
 
 # Pass environment variables and set a timeout
-tilde exec organization/repository --image alpine -e FOO=bar --timeout 5m -- ./script.sh
+tilde exec organization/repository --image busybox -e FOO=bar --timeout 5m -- ./script.sh
 ```
 
 **Flags:**
@@ -61,7 +61,7 @@ Use `tilde shell` to get a fully interactive terminal session inside a sandbox:
 tilde shell organization/repository
 
 # Start with a specific image
-tilde shell organization/repository --image ubuntu:latest
+tilde shell organization/repository --image python-3.12
 
 # Run a specific command interactively
 tilde shell organization/repository -- /bin/sh -l

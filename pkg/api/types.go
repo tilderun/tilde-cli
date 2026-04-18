@@ -71,6 +71,38 @@ type SandboxStatusResponse struct {
 	WebURL       string `json:"web_url,omitempty"`
 }
 
+// Sandbox lifecycle states. Mirrors the enum in the server OpenAPI spec.
+const (
+	SandboxStatusStarting         = "starting"
+	SandboxStatusRunning          = "running"
+	SandboxStatusCommitted        = "committed"
+	SandboxStatusAwaitingApproval = "awaiting_approval"
+	SandboxStatusFailed           = "failed"
+	SandboxStatusCancelled        = "cancelled"
+)
+
+// IsTerminal reports whether the sandbox has reached a final state from which
+// it will not transition out of.
+func (s *SandboxStatusResponse) IsTerminal() bool {
+	switch s.Status {
+	case SandboxStatusCommitted, SandboxStatusAwaitingApproval, SandboxStatusFailed, SandboxStatusCancelled:
+		return true
+	}
+	return false
+}
+
+// IsAttachable reports whether an interactive terminal may be attached now.
+// Only the `running` state accepts terminal connections.
+func (s *SandboxStatusResponse) IsAttachable() bool {
+	return s.Status == SandboxStatusRunning
+}
+
+// LogsAvailable reports whether log streams can be read now. Logs are
+// unavailable while the sandbox is still being prepared (`starting`).
+func (s *SandboxStatusResponse) LogsAvailable() bool {
+	return s.Status != SandboxStatusStarting && s.Status != ""
+}
+
 type ListSandboxesResponse struct {
 	Results    []Sandbox  `json:"results"`
 	Pagination Pagination `json:"pagination"`
