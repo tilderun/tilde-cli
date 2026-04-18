@@ -11,6 +11,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Bounds for exponential backoff when reconnecting to sandbox streams or
+// terminals. Starting at 500ms keeps typical reconnects snappy; capping at
+// 10s avoids hammering a struggling server.
+const (
+	sandboxReconnectInitialBackoff = 500 * time.Millisecond
+	sandboxReconnectMaxBackoff     = 10 * time.Second
+)
+
 func newSandboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sandbox",
@@ -78,12 +86,7 @@ Use -i/--interactive to attach an interactive terminal.`,
 				if err != nil {
 					return err
 				}
-				if err := waitForRunning(cmd.Context(), org, repo, resp.SandboxID); err != nil {
-					return err
-				}
-				wsURL := apiClient.TerminalWebSocketURL(org, repo, resp.SandboxID)
-				_, err = attachTerminal(cmd.Context(), wsURL, apiClient.APIKey)
-				if err != nil {
+				if _, err := attachTerminalWithReconnect(cmd.Context(), org, repo, resp.SandboxID); err != nil {
 					return err
 				}
 				return waitForFinalStatus(cmd.Context(), org, repo, resp.SandboxID)
@@ -118,14 +121,137 @@ func runAndStream(cmd *cobra.Command, org, repo string, req api.CreateSandboxReq
 		return err
 	}
 
-	rc, err := apiClient.StreamSandboxOutput(ctx, org, repo, resp.SandboxID, "combined")
-	if err != nil {
+	if err := streamCombinedWithRetry(ctx, org, repo, resp.SandboxID, os.Stdout); err != nil {
 		return fmt.Errorf("streaming output: %w", err)
 	}
-	_, _ = io.Copy(os.Stdout, rc)
-	rc.Close()
 
 	return waitForFinalStatus(ctx, org, repo, resp.SandboxID)
+}
+
+// attachTerminalWithReconnect attaches to a sandbox's interactive terminal,
+// waiting for the sandbox to be ready first and reconnecting if the
+// WebSocket drops while the sandbox is still running. Returns the exit code
+// from the sandbox when the server sends an exit frame, or 0 if the session
+// ended without one (e.g. user disconnected cleanly).
+//
+// Dial failures are returned as-is rather than retried: the caller has
+// already confirmed the sandbox is `running`, so a failed dial indicates a
+// persistent condition (auth, server error, non-interactive sandbox) that
+// retry won't fix. Only mid-session drops trigger a reconnect.
+func attachTerminalWithReconnect(ctx context.Context, org, repo, sandboxID string) (int, error) {
+	backoff := sandboxReconnectInitialBackoff
+	for {
+		if err := waitForRunning(ctx, org, repo, sandboxID); err != nil {
+			return 0, err
+		}
+		wsURL := apiClient.TerminalWebSocketURL(org, repo, sandboxID)
+		exitCode, dropped, err := attachTerminal(ctx, wsURL, apiClient.APIKey)
+		if err != nil {
+			return exitCode, err
+		}
+		if !dropped {
+			// Clean exit (exit frame or user-initiated close).
+			return exitCode, nil
+		}
+		// Connection dropped: reconnect only if the sandbox is still
+		// active. If it has reached a terminal state we have nothing to
+		// reattach to.
+		if ctx.Err() != nil {
+			return exitCode, ctx.Err()
+		}
+		status, sErr := apiClient.GetSandboxStatus(ctx, org, repo, sandboxID)
+		if sErr != nil || status.IsTerminal() {
+			return exitCode, nil
+		}
+		if !sleepWithContext(ctx, backoff) {
+			return exitCode, ctx.Err()
+		}
+		backoff = nextBackoff(backoff)
+		fmt.Fprintln(os.Stderr, "reconnecting to sandbox terminal...")
+	}
+}
+
+// streamCombinedWithRetry streams the combined stdout/stderr of a sandbox to
+// dst. It waits for the sandbox to leave the `starting` state before
+// connecting, and reconnects (with exponential backoff) if the stream drops
+// while the sandbox is still active.
+func streamCombinedWithRetry(ctx context.Context, org, repo, sandboxID string, dst io.Writer) error {
+	backoff := sandboxReconnectInitialBackoff
+	for {
+		if _, err := waitForLogsAvailable(ctx, org, repo, sandboxID); err != nil {
+			return err
+		}
+		rc, err := apiClient.StreamSandboxOutput(ctx, org, repo, sandboxID, "combined")
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			status, sErr := apiClient.GetSandboxStatus(ctx, org, repo, sandboxID)
+			if sErr == nil && status.IsTerminal() {
+				return nil
+			}
+			if !sleepWithContext(ctx, backoff) {
+				return ctx.Err()
+			}
+			backoff = nextBackoff(backoff)
+			continue
+		}
+		_, _ = io.Copy(dst, rc)
+		rc.Close()
+		if ctx.Err() != nil {
+			return nil
+		}
+		status, err := apiClient.GetSandboxStatus(ctx, org, repo, sandboxID)
+		if err != nil || status.IsTerminal() {
+			return nil
+		}
+		if !sleepWithContext(ctx, backoff) {
+			return nil
+		}
+		backoff = nextBackoff(backoff)
+	}
+}
+
+// waitForLogsAvailable polls the sandbox status until it has moved past the
+// `starting` state, at which point log streams can be read. Returns the
+// observed status to help callers branch on terminal vs running.
+func waitForLogsAvailable(ctx context.Context, org, repo, sandboxID string) (*api.SandboxStatusResponse, error) {
+	for {
+		status, err := apiClient.GetSandboxStatus(ctx, org, repo, sandboxID)
+		if err != nil {
+			return nil, fmt.Errorf("getting sandbox status: %w", err)
+		}
+		if status.LogsAvailable() {
+			return status, nil
+		}
+		select {
+		case <-time.After(500 * time.Millisecond):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// sleepWithContext sleeps for d or until ctx is done. Returns true if the
+// full duration elapsed, false if the context was cancelled.
+func sleepWithContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// nextBackoff doubles the current backoff up to sandboxReconnectMaxBackoff.
+func nextBackoff(d time.Duration) time.Duration {
+	d *= 2
+	if d > sandboxReconnectMaxBackoff {
+		return sandboxReconnectMaxBackoff
+	}
+	return d
 }
 
 // waitForFinalStatus polls until the sandbox reaches a terminal state and
@@ -137,7 +263,7 @@ func waitForFinalStatus(ctx context.Context, org, repo, sandboxID string) error 
 			return fmt.Errorf("getting sandbox status: %w", err)
 		}
 		switch status.Status {
-		case "committed":
+		case api.SandboxStatusCommitted:
 			if status.CommitID != "" {
 				fmt.Fprintf(os.Stderr, "Committed: %s\n", status.CommitID)
 			} else if status.StatusReason == "no_changes" {
@@ -147,7 +273,7 @@ func waitForFinalStatus(ctx context.Context, org, repo, sandboxID string) error 
 				os.Exit(*status.ExitCode)
 			}
 			return nil
-		case "awaiting_approval":
+		case api.SandboxStatusAwaitingApproval:
 			fmt.Fprintln(os.Stderr, "Commit requires approval")
 			if status.WebURL != "" {
 				fmt.Fprintf(os.Stderr, "Approve at: %s\n", status.WebURL)
@@ -156,7 +282,7 @@ func waitForFinalStatus(ctx context.Context, org, repo, sandboxID string) error 
 				os.Exit(*status.ExitCode)
 			}
 			return nil
-		case "failed":
+		case api.SandboxStatusFailed:
 			if status.ErrorMessage != "" {
 				fmt.Fprintf(os.Stderr, "Failed: %s\n", status.ErrorMessage)
 			} else if status.StatusReason != "" {
@@ -166,7 +292,7 @@ func waitForFinalStatus(ctx context.Context, org, repo, sandboxID string) error 
 				os.Exit(*status.ExitCode)
 			}
 			os.Exit(1)
-		case "cancelled":
+		case api.SandboxStatusCancelled:
 			fmt.Fprintln(os.Stderr, "Cancelled")
 			if status.ExitCode != nil {
 				os.Exit(*status.ExitCode)
@@ -181,17 +307,19 @@ func waitForFinalStatus(ctx context.Context, org, repo, sandboxID string) error 
 	}
 }
 
-// waitForRunning polls sandbox status until it reaches "running" or a terminal state.
+// waitForRunning polls sandbox status until it reaches `running`. Returns an
+// error if the sandbox hits a terminal state first, since there is nothing
+// to attach to at that point.
 func waitForRunning(ctx context.Context, org, repo, sandboxID string) error {
 	for {
 		status, err := apiClient.GetSandboxStatus(ctx, org, repo, sandboxID)
 		if err != nil {
 			return fmt.Errorf("waiting for sandbox: %w", err)
 		}
-		switch status.Status {
-		case "running":
+		if status.IsAttachable() {
 			return nil
-		case "committed", "awaiting_approval", "failed", "cancelled":
+		}
+		if status.IsTerminal() {
 			return fmt.Errorf("sandbox reached terminal state %q before becoming ready", status.Status)
 		}
 		select {

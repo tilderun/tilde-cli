@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -58,17 +57,10 @@ func newShellCmd() *cobra.Command {
 				return err
 			}
 
-			if err := waitForRunning(cmd.Context(), org, repo, resp.SandboxID); err != nil {
+			if _, err := attachTerminalWithReconnect(cmd.Context(), org, repo, resp.SandboxID); err != nil {
 				return err
 			}
-
-			wsURL := apiClient.TerminalWebSocketURL(org, repo, resp.SandboxID)
-			exitCode, err := attachTerminal(cmd.Context(), wsURL, apiClient.APIKey)
-			if err != nil {
-				return err
-			}
-			os.Exit(exitCode)
-			return nil
+			return waitForFinalStatus(cmd.Context(), org, repo, resp.SandboxID)
 		},
 	}
 

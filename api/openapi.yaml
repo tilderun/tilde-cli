@@ -5104,8 +5104,24 @@ components:
         status:
           type: string
           enum: [starting, running, committed, awaiting_approval, failed, cancelled]
+          description: |
+            Public sandbox lifecycle state. Values are stable.
+
+            * `starting` - sandbox is being prepared; wait, do not attach.
+            * `running` - sandbox is ready; you may attach its terminal and/or stream its logs.
+            * `committed` - finished, changes committed; disconnect and read `commit_id`.
+            * `awaiting_approval` - finished but the session requires human approval before
+              changes can land; disconnect and surface `web_url`.
+            * `failed` - sandbox errored; disconnect and read `error_message`.
+            * `cancelled` - cancelled by a user or operator; disconnect.
+
+            The first two are active; the last four are terminal.
         status_reason:
           type: string
+          description: |
+            Stable machine-readable qualifier for the current status. Values include
+            `internal_error`, `exit_nonzero`, `commit_failed`, `approval_required`,
+            `policy_violation`, `cancelled_by_user`, `cancel_requested`, `timeout`, `no_changes`.
         exit_code:
           type: integer
           nullable: true
@@ -5113,6 +5129,9 @@ components:
           type: string
         web_url:
           type: string
+        error_message:
+          type: string
+          description: Present when `status` is `failed`; human-readable sandbox-level reason.
 
     PutSecretRequest:
       type: object

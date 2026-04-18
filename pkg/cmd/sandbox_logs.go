@@ -1,12 +1,18 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/spf13/cobra"
 )
+
+// snapshotMaxAttempts bounds retries for one-shot log fetches. Three
+// attempts is enough to paper over a transient network blip without
+// masking a real outage.
+const snapshotMaxAttempts = 3
 
 func newSandboxLogsCmd() *cobra.Command {
 	var (
@@ -31,19 +37,10 @@ func newSandboxLogsCmd() *cobra.Command {
 			}
 			sandboxID := args[0]
 
-			var rc io.ReadCloser
 			if follow {
-				rc, err = apiClient.StreamSandboxOutput(cmd.Context(), org, repo, sandboxID, "combined")
-			} else {
-				rc, err = apiClient.GetSandboxOutput(cmd.Context(), org, repo, sandboxID, "combined")
+				return streamCombinedWithRetry(cmd.Context(), org, repo, sandboxID, os.Stdout)
 			}
-			if err != nil {
-				return err
-			}
-			defer rc.Close()
-
-			_, _ = io.Copy(os.Stdout, rc)
-			return nil
+			return snapshotLogsWithRetry(cmd.Context(), org, repo, sandboxID, os.Stdout)
 		},
 	}
 
@@ -52,4 +49,44 @@ func newSandboxLogsCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("repository")
 
 	return cmd
+}
+
+// snapshotLogsWithRetry fetches the current combined-output snapshot of a
+// sandbox. It first waits for the sandbox to be past the `starting` state
+// (logs do not exist yet). A small number of retries guards against
+// transient network failures during the fetch.
+func snapshotLogsWithRetry(ctx context.Context, org, repo, sandboxID string, dst io.Writer) error {
+	if _, err := waitForLogsAvailable(ctx, org, repo, sandboxID); err != nil {
+		return err
+	}
+	backoff := sandboxReconnectInitialBackoff
+	var lastErr error
+	for attempt := 0; attempt < snapshotMaxAttempts; attempt++ {
+		rc, err := apiClient.GetSandboxOutput(ctx, org, repo, sandboxID, "combined")
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if !sleepWithContext(ctx, backoff) {
+				return ctx.Err()
+			}
+			backoff = nextBackoff(backoff)
+			continue
+		}
+		_, copyErr := io.Copy(dst, rc)
+		rc.Close()
+		if copyErr == nil {
+			return nil
+		}
+		lastErr = copyErr
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !sleepWithContext(ctx, backoff) {
+			return ctx.Err()
+		}
+		backoff = nextBackoff(backoff)
+	}
+	return lastErr
 }

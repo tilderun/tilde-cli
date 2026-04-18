@@ -163,3 +163,32 @@ func TestTerminalWebSocketURL_HTTP(t *testing.T) {
 		t.Errorf("TerminalWebSocketURL = %q, want %q", got, want)
 	}
 }
+
+func TestSandboxStatusHelpers(t *testing.T) {
+	tests := []struct {
+		status      string
+		terminal    bool
+		attachable  bool
+		logsAvail   bool
+	}{
+		{SandboxStatusStarting, false, false, false},
+		{SandboxStatusRunning, false, true, true},
+		{SandboxStatusCommitted, true, false, true},
+		{SandboxStatusAwaitingApproval, true, false, true},
+		{SandboxStatusFailed, true, false, true},
+		{SandboxStatusCancelled, true, false, true},
+		{"", false, false, false},
+	}
+	for _, tt := range tests {
+		s := &SandboxStatusResponse{Status: tt.status}
+		if got := s.IsTerminal(); got != tt.terminal {
+			t.Errorf("status %q IsTerminal = %v, want %v", tt.status, got, tt.terminal)
+		}
+		if got := s.IsAttachable(); got != tt.attachable {
+			t.Errorf("status %q IsAttachable = %v, want %v", tt.status, got, tt.attachable)
+		}
+		if got := s.LogsAvailable(); got != tt.logsAvail {
+			t.Errorf("status %q LogsAvailable = %v, want %v", tt.status, got, tt.logsAvail)
+		}
+	}
+}
