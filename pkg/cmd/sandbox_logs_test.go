@@ -14,7 +14,7 @@ func TestSandboxLogs(t *testing.T) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			_ = json.NewEncoder(w).Encode(api.SandboxStatusResponse{Status: api.SandboxStatusRunning})
-		case strings.HasSuffix(r.URL.Path, "/combined"):
+		case strings.HasSuffix(r.URL.Path, "/logs/stdout"):
 			w.Write([]byte("log line 1\nlog line 2\n"))
 		default:
 			t.Errorf("unexpected path = %s", r.URL.Path)
@@ -42,7 +42,7 @@ func TestSandboxLogs_WaitsForStart(t *testing.T) {
 				s = api.SandboxStatusRunning
 			}
 			_ = json.NewEncoder(w).Encode(api.SandboxStatusResponse{Status: s})
-		case strings.HasSuffix(r.URL.Path, "/combined"):
+		case strings.HasSuffix(r.URL.Path, "/logs/stdout"):
 			w.Write([]byte("ok\n"))
 		default:
 			t.Errorf("unexpected path = %s", r.URL.Path)
@@ -66,7 +66,7 @@ func TestSandboxLogs_TerminalStateReadsSnapshot(t *testing.T) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			_ = json.NewEncoder(w).Encode(api.SandboxStatusResponse{Status: api.SandboxStatusCommitted})
-		case strings.HasSuffix(r.URL.Path, "/combined"):
+		case strings.HasSuffix(r.URL.Path, "/logs/stdout"):
 			w.Write([]byte("final output\n"))
 		default:
 			t.Errorf("unexpected path = %s", r.URL.Path)

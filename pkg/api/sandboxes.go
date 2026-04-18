@@ -59,10 +59,10 @@ func (c *Client) GetSandboxStatus(ctx context.Context, org, repo, sandboxID stri
 	return &resp, nil
 }
 
-// StreamSandboxOutput streams sandbox output (stdout, stderr, or combined).
-// The caller must close the returned ReadCloser.
+// StreamSandboxOutput streams sandbox output. stream is "stdout" (merged
+// stdout+stderr) or "network". The caller must close the returned ReadCloser.
 func (c *Client) StreamSandboxOutput(ctx context.Context, org, repo, sandboxID, stream string) (io.ReadCloser, error) {
-	path := fmt.Sprintf("/organizations/%s/repositories/%s/sandboxes/%s/%s",
+	path := fmt.Sprintf("/organizations/%s/repositories/%s/sandboxes/%s/logs/%s",
 		url.PathEscape(org), url.PathEscape(repo), url.PathEscape(sandboxID), url.PathEscape(stream))
 	resp, err := c.doStream(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -74,7 +74,7 @@ func (c *Client) StreamSandboxOutput(ctx context.Context, org, repo, sandboxID, 
 // GetSandboxOutput fetches sandbox output as a snapshot using the regular HTTP client (with timeout).
 // The caller must close the returned ReadCloser.
 func (c *Client) GetSandboxOutput(ctx context.Context, org, repo, sandboxID, stream string) (io.ReadCloser, error) {
-	path := fmt.Sprintf("/organizations/%s/repositories/%s/sandboxes/%s/%s",
+	path := fmt.Sprintf("/organizations/%s/repositories/%s/sandboxes/%s/logs/%s",
 		url.PathEscape(org), url.PathEscape(repo), url.PathEscape(sandboxID), url.PathEscape(stream))
 	resp, err := c.doRaw(ctx, http.MethodGet, path, nil, "")
 	if err != nil {

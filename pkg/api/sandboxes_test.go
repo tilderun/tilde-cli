@@ -126,15 +126,15 @@ func TestGetSandboxStatus(t *testing.T) {
 
 func TestStreamSandboxOutput(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/combined") {
-			t.Errorf("path = %s, want /combined suffix", r.URL.Path)
+		if !strings.HasSuffix(r.URL.Path, "/logs/stdout") {
+			t.Errorf("path = %s, want /logs/stdout suffix", r.URL.Path)
 		}
 		w.Write([]byte("hello from sandbox\n"))
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "tuk-key")
-	rc, err := c.StreamSandboxOutput(context.Background(), "org", "repo", "sb-123", "combined")
+	rc, err := c.StreamSandboxOutput(context.Background(), "org", "repo", "sb-123", "stdout")
 	if err != nil {
 		t.Fatalf("StreamSandboxOutput: %v", err)
 	}

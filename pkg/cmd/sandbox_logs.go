@@ -62,7 +62,7 @@ func snapshotLogsWithRetry(ctx context.Context, org, repo, sandboxID string, dst
 	backoff := sandboxReconnectInitialBackoff
 	var lastErr error
 	for attempt := 0; attempt < snapshotMaxAttempts; attempt++ {
-		rc, err := apiClient.GetSandboxOutput(ctx, org, repo, sandboxID, "combined")
+		rc, err := apiClient.GetSandboxOutput(ctx, org, repo, sandboxID, "stdout")
 		if err != nil {
 			lastErr = err
 			if ctx.Err() != nil {

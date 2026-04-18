@@ -181,7 +181,7 @@ func streamCombinedWithRetry(ctx context.Context, org, repo, sandboxID string, d
 		if _, err := waitForLogsAvailable(ctx, org, repo, sandboxID); err != nil {
 			return err
 		}
-		rc, err := apiClient.StreamSandboxOutput(ctx, org, repo, sandboxID, "combined")
+		rc, err := apiClient.StreamSandboxOutput(ctx, org, repo, sandboxID, "stdout")
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

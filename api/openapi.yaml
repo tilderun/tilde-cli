@@ -3285,10 +3285,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/stdout:
+  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/logs/stdout:
     get:
       tags: [Sandboxes]
       summary: Stream sandbox stdout
+      description: >
+        Merged stdout and stderr of the user command, interleaved in the order
+        output was produced. There is no separate stderr endpoint; the in-pod
+        runner merges both into a single byte stream.
       operationId: getSandboxStdout
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -3296,7 +3300,7 @@ paths:
         - $ref: '#/components/parameters/SandboxID'
       responses:
         '200':
-          description: Stdout stream
+          description: Merged stdout+stderr stream
           content:
             text/plain:
               schema:
@@ -3304,54 +3308,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '410':
-          description: Logs have been evicted
+          description: Logs are no longer available
 
-  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/stderr:
-    get:
-      tags: [Sandboxes]
-      summary: Stream sandbox stderr
-      operationId: getSandboxStderr
-      parameters:
-        - $ref: '#/components/parameters/Organization'
-        - $ref: '#/components/parameters/Repository'
-        - $ref: '#/components/parameters/SandboxID'
-      responses:
-        '200':
-          description: Stderr stream
-          content:
-            text/plain:
-              schema:
-                type: string
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '410':
-          description: Logs have been evicted
-
-  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/combined:
-    get:
-      tags: [Sandboxes]
-      summary: Stream sandbox combined output
-      description: >
-        Interleaved stdout and stderr stream, in the order output was produced
-        by the container (similar to terminal shell output).
-      operationId: getSandboxCombined
-      parameters:
-        - $ref: '#/components/parameters/Organization'
-        - $ref: '#/components/parameters/Repository'
-        - $ref: '#/components/parameters/SandboxID'
-      responses:
-        '200':
-          description: Combined stdout+stderr stream
-          content:
-            text/plain:
-              schema:
-                type: string
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '410':
-          description: Logs have been evicted
-
-  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/network:
+  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/logs/network:
     get:
       tags: [Sandboxes]
       summary: Stream sandbox network request logs
@@ -3374,7 +3333,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '410':
-          description: Logs have been evicted
+          description: Logs are no longer available
 
   /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/terminal:
     get:
