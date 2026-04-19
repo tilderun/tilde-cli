@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -192,6 +193,26 @@ func pollDeviceToken(ctx context.Context, client *http.Client, baseURL, deviceCo
 }
 
 func runAuthStatus(ctx context.Context) error {
+	// Sandbox IMDS: when running inside a tilde sandbox the proxy sidecar
+	// exposes short-lived credentials for the sandbox's target principal.
+	// The principal may be an agent, for which /auth/me does not apply, so
+	// report the identity directly from the metadata response.
+	if uri := os.Getenv("TILDE_SANDBOX_CREDENTIALS_URI"); uri != "" {
+		src := api.NewMetadataTokenSource(uri)
+		creds, err := src.Fetch(ctx)
+		if err != nil {
+			fmt.Println("Not logged in (failed to fetch sandbox credentials).")
+			return fmt.Errorf("fetching sandbox credentials: %w", err)
+		}
+		name := creds.PrincipalName
+		if name == "" {
+			name = creds.PrincipalID
+		}
+		fmt.Printf("Logged in as %s %q via sandbox identity (organization %s)\n",
+			creds.PrincipalType, name, creds.OrganizationID)
+		return nil
+	}
+
 	apiKey, endpoint := resolveAPIKey()
 	if apiKey == "" {
 		fmt.Println("Not logged in.")

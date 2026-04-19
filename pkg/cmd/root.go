@@ -37,8 +37,14 @@ func resolveAPIKey() (apiKey, endpoint string) {
 }
 
 // resolveEndpoint returns the endpoint using precedence: env > config > default.
+// TILDE_API_URL is accepted as an alias for TILDE_ENDPOINT_URL so that the
+// environment injected into tilde sandboxes (per the identity metadata spec)
+// is picked up automatically.
 func resolveEndpoint() string {
 	if ep := os.Getenv("TILDE_ENDPOINT_URL"); ep != "" {
+		return ep
+	}
+	if ep := os.Getenv("TILDE_API_URL"); ep != "" {
 		return ep
 	}
 	cfg, err := config.Load()

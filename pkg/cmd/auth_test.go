@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/tilderun/tilde-cli/pkg/api"
 	"github.com/tilderun/tilde-cli/pkg/config"
 )
 
@@ -22,6 +24,35 @@ func TestAuthStatus_NotLoggedIn(t *testing.T) {
 	root.SetArgs([]string{"auth", "status"})
 	if err := root.Execute(); err == nil {
 		t.Fatal("expected error for unauthenticated status")
+	}
+}
+
+func TestAuthStatus_SandboxCredentialsURI(t *testing.T) {
+	// auth status must honor TILDE_SANDBOX_CREDENTIALS_URI so sandbox
+	// workloads see their inherited identity (which may be an agent, for
+	// which /auth/me does not apply).
+	metadata := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(api.Credentials{
+			AccessToken:    "tst-xyz",
+			ExpiresAt:      time.Now().Add(15 * time.Minute),
+			PrincipalType:  "agent",
+			PrincipalID:    "p-1",
+			PrincipalName:  "deploy-bot",
+			OrganizationID: "org-1",
+			APIURL:         "https://api.tilde.run",
+		})
+	}))
+	defer metadata.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TILDE_API_KEY", "")
+	t.Setenv("TILDE_SANDBOX_CREDENTIALS_URI", metadata.URL)
+
+	root := NewRootCmd()
+	root.SetArgs([]string{"auth", "status"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("auth status: %v", err)
 	}
 }
 
