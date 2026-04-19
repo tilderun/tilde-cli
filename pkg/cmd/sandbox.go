@@ -145,7 +145,11 @@ func attachTerminalWithReconnect(ctx context.Context, org, repo, sandboxID strin
 			return 0, err
 		}
 		wsURL := apiClient.TerminalWebSocketURL(org, repo, sandboxID)
-		exitCode, dropped, err := attachTerminal(ctx, wsURL, apiClient.APIKey)
+		token, err := apiClient.Token(ctx)
+		if err != nil {
+			return 0, err
+		}
+		exitCode, dropped, err := attachTerminal(ctx, wsURL, token)
 		if err != nil {
 			return exitCode, err
 		}

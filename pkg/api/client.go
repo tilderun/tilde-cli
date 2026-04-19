@@ -13,16 +13,23 @@ import (
 // Client is the Tilde API HTTP client.
 type Client struct {
 	BaseURL      string // e.g. "https://tilde.run/api/v1"
-	APIKey       string
+	TokenSource  TokenSource
 	HTTPClient   *http.Client
 	StreamClient *http.Client // separate client for long-lived streaming (no timeout)
 }
 
-// NewClient creates a new API client.
+// NewClient creates a new API client backed by a static API key.
 func NewClient(baseURL, apiKey string) *Client {
+	return NewClientWithTokenSource(baseURL, StaticTokenSource{Value: apiKey})
+}
+
+// NewClientWithTokenSource creates a new API client that fetches bearer
+// tokens from the given TokenSource. Used for sandbox-principal tokens
+// (see pkg/api/credentials.go) that must be refreshed before expiry.
+func NewClientWithTokenSource(baseURL string, src TokenSource) *Client {
 	return &Client{
-		BaseURL: baseURL,
-		APIKey:  apiKey,
+		BaseURL:     baseURL,
+		TokenSource: src,
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -37,6 +44,14 @@ func NewClient(baseURL, apiKey string) *Client {
 	}
 }
 
+// Token returns the current bearer token from the client's token source.
+func (c *Client) Token(ctx context.Context) (string, error) {
+	if c.TokenSource == nil {
+		return "", fmt.Errorf("client has no token source")
+	}
+	return c.TokenSource.Token(ctx)
+}
+
 // do executes an HTTP request against the API with authentication.
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	url := c.BaseURL + path
@@ -44,7 +59,11 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (*
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	token, err := c.Token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -58,7 +77,11 @@ func (c *Client) doStream(ctx context.Context, method, path string, body io.Read
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	token, err := c.Token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -111,7 +134,11 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body io.Reader,
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	token, err := c.Token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}

@@ -77,6 +77,22 @@ Execute a command:
 				return nil
 			}
 
+			// Sandbox IMDS: when running inside a tilde sandbox the proxy
+			// sidecar exposes a metadata endpoint that mints short-lived
+			// sandbox-principal tokens. If the env var is set, it takes
+			// precedence over flags/config so SDK-style inheritance just
+			// works without any user action.
+			if uri := os.Getenv("TILDE_SANDBOX_CREDENTIALS_URI"); uri != "" && flagAPIKey == "" {
+				src := api.NewMetadataTokenSource(uri)
+				creds, err := src.Fetch(cmd.Context())
+				if err != nil {
+					return fmt.Errorf("fetching sandbox credentials from %s: %w", uri, err)
+				}
+				baseURL := strings.TrimRight(creds.APIURL, "/") + "/api/v1"
+				apiClient = api.NewClientWithTokenSource(baseURL, src)
+				return nil
+			}
+
 			// Resolve API key: flag > env > config
 			apiKey := flagAPIKey
 			if apiKey == "" {

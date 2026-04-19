@@ -16,8 +16,12 @@ func TestNewClient(t *testing.T) {
 	if c.BaseURL != "https://example.com/api/v1" {
 		t.Errorf("BaseURL = %q, want %q", c.BaseURL, "https://example.com/api/v1")
 	}
-	if c.APIKey != "tuk-testkey" {
-		t.Errorf("APIKey = %q, want %q", c.APIKey, "tuk-testkey")
+	tok, err := c.Token(context.Background())
+	if err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if tok != "tuk-testkey" {
+		t.Errorf("Token = %q, want %q", tok, "tuk-testkey")
 	}
 	if c.HTTPClient == nil {
 		t.Error("HTTPClient is nil")
