@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tilderun/tilde-cli/pkg/api"
+	"github.com/tilderun/tilde-cli/pkg/config"
 )
 
 func TestRootCmd_MissingAPIKey(t *testing.T) {
@@ -140,26 +141,64 @@ func TestRootCmd_SandboxCredentialsURI(t *testing.T) {
 	}
 }
 
-func TestRootCmd_SandboxCredentialsURI_FlagOverrides(t *testing.T) {
-	// An explicit --api-key should win over the metadata URI so that
-	// humans debugging inside a sandbox can still target a specific key.
-	t.Setenv("TILDE_API_KEY", "")
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("TILDE_SANDBOX_CREDENTIALS_URI", "http://127.0.0.1:1/should-not-be-called")
-
-	root := NewRootCmd()
-	root.SetArgs([]string{"--api-key", "tuk-explicit", "repository", "ls"})
-	_ = root.Execute()
-
-	if apiClient == nil {
-		t.Fatal("apiClient should be initialized")
+func TestRootCmd_ExplicitAPIKeyWinsOverSandboxURI(t *testing.T) {
+	// Explicit credentials (--api-key flag, TILDE_API_KEY env, config
+	// file) are set by the caller and should always win over the sandbox
+	// metadata URI, which is a fallback for workloads that haven't
+	// configured their own credentials.
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, args *[]string)
+	}{
+		{
+			name: "flag",
+			setup: func(t *testing.T, args *[]string) {
+				t.Setenv("TILDE_API_KEY", "")
+				*args = append([]string{"--api-key", "tuk-explicit"}, *args...)
+			},
+		},
+		{
+			name: "env",
+			setup: func(t *testing.T, args *[]string) {
+				t.Setenv("TILDE_API_KEY", "tuk-explicit")
+			},
+		},
+		{
+			name: "config",
+			setup: func(t *testing.T, args *[]string) {
+				t.Setenv("TILDE_API_KEY", "")
+				if err := config.Save(&config.Config{APIKey: "tuk-explicit"}); err != nil {
+					t.Fatalf("Save config: %v", err)
+				}
+			},
+		},
 	}
-	tok, err := apiClient.Token(t.Context())
-	if err != nil {
-		t.Fatalf("Token: %v", err)
-	}
-	if tok != "tuk-explicit" {
-		t.Errorf("Token = %q, want %q (--api-key flag should win)", tok, "tuk-explicit")
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			// Point at an unreachable URI so a mistaken fetch would error
+			// immediately rather than hang or succeed.
+			t.Setenv("TILDE_SANDBOX_CREDENTIALS_URI", "http://127.0.0.1:1/should-not-be-called")
+
+			args := []string{"repository", "ls"}
+			tc.setup(t, &args)
+
+			root := NewRootCmd()
+			root.SetArgs(args)
+			_ = root.Execute()
+
+			if apiClient == nil {
+				t.Fatal("apiClient should be initialized")
+			}
+			tok, err := apiClient.Token(t.Context())
+			if err != nil {
+				t.Fatalf("Token: %v", err)
+			}
+			if tok != "tuk-explicit" {
+				t.Errorf("Token = %q, want %q (explicit key should win)", tok, "tuk-explicit")
+			}
+		})
 	}
 }
 

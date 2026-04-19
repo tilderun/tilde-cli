@@ -193,7 +193,26 @@ func pollDeviceToken(ctx context.Context, client *http.Client, baseURL, deviceCo
 }
 
 func runAuthStatus(ctx context.Context) error {
-	// Sandbox IMDS: when running inside a tilde sandbox the proxy sidecar
+	apiKey, endpoint := resolveAPIKey()
+
+	// Explicit API key (env or config) wins over the sandbox metadata URI
+	// so the user can target a specific principal while inside a sandbox.
+	if apiKey != "" {
+		baseURL := strings.TrimRight(endpoint, "/") + "/api/v1"
+		client := api.NewClient(baseURL, apiKey)
+
+		var me authMeResponse
+		_, err := client.DoJSON(ctx, http.MethodGet, "/auth/me", nil, &me)
+		if err != nil {
+			fmt.Println("Not logged in (invalid or expired token).")
+			return fmt.Errorf("not logged in")
+		}
+
+		fmt.Printf("Logged in as %s (%s)\n", me.User.Username, me.User.Email)
+		return nil
+	}
+
+	// Sandbox IMDS fallback: inside a tilde sandbox the proxy sidecar
 	// exposes short-lived credentials for the sandbox's target principal.
 	// The principal may be an agent, for which /auth/me does not apply, so
 	// report the identity directly from the metadata response.
@@ -213,24 +232,8 @@ func runAuthStatus(ctx context.Context) error {
 		return nil
 	}
 
-	apiKey, endpoint := resolveAPIKey()
-	if apiKey == "" {
-		fmt.Println("Not logged in.")
-		return fmt.Errorf("not logged in")
-	}
-
-	baseURL := strings.TrimRight(endpoint, "/") + "/api/v1"
-	client := api.NewClient(baseURL, apiKey)
-
-	var me authMeResponse
-	_, err := client.DoJSON(ctx, http.MethodGet, "/auth/me", nil, &me)
-	if err != nil {
-		fmt.Println("Not logged in (invalid or expired token).")
-		return fmt.Errorf("not logged in")
-	}
-
-	fmt.Printf("Logged in as %s (%s)\n", me.User.Username, me.User.Email)
-	return nil
+	fmt.Println("Not logged in.")
+	return fmt.Errorf("not logged in")
 }
 
 func openBrowser(url string) {
