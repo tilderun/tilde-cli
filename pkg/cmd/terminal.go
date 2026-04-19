@@ -37,7 +37,14 @@ type resizeFrame struct {
 // indicating a connection drop rather than a clean client-side exit), and
 // any terminal error from dial/raw-mode setup.
 func attachTerminal(ctx context.Context, wsURL, apiKey string) (int, bool, error) {
-	dialer := websocket.Dialer{}
+	// Honor HTTP_PROXY/HTTPS_PROXY. Inside a tilde sandbox all outbound
+	// TCP is redirected to the proxy sidecar (see identity metadata spec);
+	// without this the WebSocket dial would attempt a raw TLS handshake
+	// against the proxy and fail with "first record does not look like a
+	// TLS handshake".
+	dialer := websocket.Dialer{
+		Proxy: http.ProxyFromEnvironment,
+	}
 	headers := http.Header{}
 	headers.Set("Authorization", "Bearer "+apiKey)
 
