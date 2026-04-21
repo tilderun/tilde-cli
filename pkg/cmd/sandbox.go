@@ -62,7 +62,9 @@ Use -i/--interactive to attach an interactive terminal.`,
 				return err
 			}
 
+			mode := api.SandboxModeOneShot
 			if interactive {
+				mode = api.SandboxModeInteractive
 				envMap = withInteractiveTerm(envMap)
 			}
 
@@ -73,7 +75,7 @@ Use -i/--interactive to attach an interactive terminal.`,
 				PathPrefix:     pathPrefix,
 				TimeoutSeconds: timeout,
 				EnvVars:        envMap,
-				Interactive:    interactive,
+				Mode:           mode,
 			}
 
 			if detach {

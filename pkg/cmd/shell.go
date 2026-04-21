@@ -47,7 +47,7 @@ func newShellCmd() *cobra.Command {
 			req := api.CreateSandboxRequest{
 				Image:          image,
 				Command:        args[1:], // empty if no command provided
-				Interactive:    true,
+				Mode:           api.SandboxModeInteractive,
 				TimeoutSeconds: timeoutSeconds,
 				EnvVars:        withInteractiveTerm(envMap),
 			}

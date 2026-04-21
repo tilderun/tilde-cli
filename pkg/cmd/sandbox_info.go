@@ -42,6 +42,9 @@ func newSandboxInfoCmd() *cobra.Command {
 				fmt.Fprintf(w, "Exit Code:   %d\n", *sb.ExitCode)
 			}
 			fmt.Fprintf(w, "Image:       %s\n", sb.Image)
+			if sb.Mode != "" {
+				fmt.Fprintf(w, "Mode:        %s\n", sb.Mode)
+			}
 			if len(sb.Command) > 0 {
 				fmt.Fprintf(w, "Command:     %s\n", strings.Join(sb.Command, " "))
 			}

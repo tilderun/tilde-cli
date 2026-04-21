@@ -32,7 +32,9 @@ type CreateSandboxRequest struct {
 	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
 	EnvVars        map[string]string `json:"env_vars,omitempty"`
 	RunAs          string            `json:"run_as,omitempty"`
-	Interactive    bool              `json:"interactive,omitempty"`
+	// Mode is one of SandboxMode* constants. Omit to get the server default
+	// (one-shot).
+	Mode string `json:"mode,omitempty"`
 }
 
 type CreateSandboxResponse struct {
@@ -47,7 +49,7 @@ type Sandbox struct {
 	Mountpoint     string            `json:"mountpoint,omitempty"`
 	PathPrefix     string            `json:"path_prefix,omitempty"`
 	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
-	Interactive    bool              `json:"interactive,omitempty"`
+	Mode           string            `json:"mode,omitempty"`
 	EnvVars        map[string]string `json:"env_vars,omitempty"`
 	Status         string            `json:"status"`
 	StatusReason   string            `json:"status_reason,omitempty"`
@@ -79,6 +81,13 @@ const (
 	SandboxStatusAwaitingApproval = "awaiting_approval"
 	SandboxStatusFailed           = "failed"
 	SandboxStatusCancelled        = "cancelled"
+)
+
+// Sandbox execution modes. Mirrors the enum in the server OpenAPI spec.
+const (
+	SandboxModeOneShot     = "one-shot"
+	SandboxModeInteractive = "interactive"
+	SandboxModeService     = "service"
 )
 
 // IsTerminal reports whether the sandbox has reached a final state from which

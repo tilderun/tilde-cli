@@ -3590,7 +3590,7 @@ paths:
       description: >
         WebSocket endpoint for bidirectional terminal I/O with an interactive sandbox.
         Upgrades to a WebSocket connection using binary frames. Only available for
-        sandboxes created with `interactive: true` that are in a non-terminal state.
+        sandboxes created with `mode: "interactive"` that are in a non-terminal state.
 
         Binary frame protocol (first byte is frame type):
         - `0x00` (client→server): stdin data
@@ -3611,6 +3611,76 @@ paths:
           description: Terminal session unavailable (e.g., after crash recovery)
         '410':
           description: Sandbox has already finished
+
+  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/finish:
+    post:
+      tags: [Sandboxes]
+      summary: Gracefully finish a service-mode sandbox (commit path)
+      description: >
+        Ask the sandbox runner to terminate gracefully with exit code 0. The
+        pod winds down cleanly and the orchestrator's reconciler takes the
+        commit path (no cancel flag set). This is the counterpart of
+        `DELETE` (which rolls back) and is only supported for
+        `mode: "service"` sandboxes -- one-shot sandboxes end when their
+        command exits and interactive sandboxes end when the shell exits.
+        The response is returned as soon as the shutdown is dispatched;
+        clients poll `/status` to observe the final `committed` state.
+      operationId: finishSandbox
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SandboxID'
+      responses:
+        '202':
+          description: Shutdown accepted; sandbox will transition asynchronously.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '400':
+          description: Sandbox is not in service mode.
+        '409':
+          description: Sandbox is already in a terminal status.
+        '502':
+          description: Streamer sidecar unreachable.
+        '503':
+          description: Sandbox runtime not configured.
+
+  /organizations/{organization}/repositories/{repository}/sandboxes/{sandbox_id}/exec:
+    get:
+      tags: [Sandboxes]
+      summary: Run a one-shot command in a sandbox
+      description: >
+        WebSocket endpoint that spawns a single child process inside a running
+        sandbox container and relays its stdout, stderr, and exit code. The child
+        has no controlling terminal; stdin/stdout/stderr are plain pipes and the
+        two output streams are delivered separately. The connection closes after
+        the `Exit` frame.
+
+        Binary frame protocol (first byte is frame type):
+        - `0x00` (client→server): JSON launch `{"cmd":["sh","-c","ls"],"env":{...},"cwd":"/sandbox"}`. Must be the first frame.
+        - `0x01` (client→server): stdin bytes
+        - `0x02` (client→server): empty; closes child stdin (EOF)
+        - `0x03` (server→client): stdout bytes
+        - `0x04` (server→client): stderr bytes
+        - `0x05` (server→client): JSON exit `{"exit_code":N,"reason":"...","error":"..."}`
+      operationId: getSandboxExec
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - $ref: '#/components/parameters/SandboxID'
+      responses:
+        '200':
+          description: WebSocket upgrade successful (101 Switching Protocols)
+        '403':
+          description: Not authorized, or Origin header disallowed
+        '410':
+          description: Sandbox has already finished
+        '503':
+          description: Sandbox runtime not configured or not yet ready
 
   # --- Sandbox Triggers ---
   /organizations/{organization}/repositories/{repository}/sandbox-triggers:
@@ -5239,7 +5309,15 @@ components:
           type: array
           items:
             type: string
-          description: Command to execute in the container
+          description: >
+            Command to execute in the container. Interpretation depends on `mode`:
+
+            - `one-shot`: the command runs and the sandbox exits. If omitted,
+              the image's default ENTRYPOINT + CMD is used.
+            - `interactive`: the command is run inside the allocated pty.
+              If omitted, defaults to `/bin/sh`.
+            - `service`: ignored. No main process is spawned; the sandbox only
+              serves `/exec` requests.
         mountpoint:
           type: string
           default: /sandbox
@@ -5270,13 +5348,21 @@ components:
               format: uuid
               description: UUID of the agent or role
           required: [type, id]
-        interactive:
-          type: boolean
-          default: false
+        mode:
+          type: string
+          enum: [one-shot, interactive, service]
+          default: one-shot
           description: >
-            Enable interactive terminal mode. When true, the sandbox allocates a TTY and
-            exposes a WebSocket endpoint for bidirectional terminal I/O. The command defaults
-            to /bin/sh if not specified.
+            Sandbox execution mode.
+
+            - `one-shot` (default): run `command` (or a no-op if absent) and
+              exit. Stdout/stderr are captured into the sandbox's stdout log.
+              `/exec` is available while the main command is still running.
+            - `interactive`: allocate a pty and attach to `/terminal` for
+              bidirectional keyboard I/O. `command` defaults to `/bin/sh`.
+            - `service`: keep the sandbox alive with no main process. The
+              runner idles and only spawns children on `/exec` requests.
+              Ends on `timeout_seconds`, DELETE, or an explicit shutdown.
 
     Sandbox:
       type: object
@@ -5300,9 +5386,10 @@ components:
         timeout_seconds:
           type: integer
           nullable: true
-        interactive:
-          type: boolean
-          description: Whether the sandbox is an interactive terminal session
+        mode:
+          type: string
+          enum: [one-shot, interactive, service]
+          description: Sandbox execution mode (see CreateSandboxRequest.mode)
         env_vars:
           type: object
           additionalProperties:
