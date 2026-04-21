@@ -49,7 +49,7 @@ func newShellCmd() *cobra.Command {
 				Command:        args[1:], // empty if no command provided
 				Interactive:    true,
 				TimeoutSeconds: timeoutSeconds,
-				EnvVars:        envMap,
+				EnvVars:        withInteractiveTerm(envMap),
 			}
 
 			resp, err := apiClient.CreateSandbox(cmd.Context(), org, repo, req)
@@ -69,6 +69,21 @@ func newShellCmd() *cobra.Command {
 	cmd.Flags().StringVar(&timeout, "timeout", "", "Sandbox timeout (e.g. 30s, 5m, 1h)")
 
 	return cmd
+}
+
+// withInteractiveTerm ensures TERM is set for interactive sandboxes so that
+// terminfo-based commands like `clear` and `tput` work. Defaults to xterm,
+// which most base images ship a terminfo entry for. Any user-supplied TERM
+// wins.
+func withInteractiveTerm(env map[string]string) map[string]string {
+	if _, ok := env["TERM"]; ok {
+		return env
+	}
+	if env == nil {
+		env = make(map[string]string, 1)
+	}
+	env["TERM"] = "xterm"
+	return env
 }
 
 // parseEnvVars parses KEY=VALUE pairs into a map.

@@ -62,6 +62,10 @@ Use -i/--interactive to attach an interactive terminal.`,
 				return err
 			}
 
+			if interactive {
+				envMap = withInteractiveTerm(envMap)
+			}
+
 			req := api.CreateSandboxRequest{
 				Image:          image,
 				Command:        args,
