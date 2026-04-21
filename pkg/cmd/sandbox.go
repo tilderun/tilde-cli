@@ -98,7 +98,7 @@ Use -i/--interactive to attach an interactive terminal.`,
 	}
 
 	cmd.Flags().StringVarP(&repoFlag, "repository", "r", "", "Repository (organization/repository)")
-	cmd.Flags().StringVar(&image, "image", "", "Sandbox image (see https://docs.tilde.run)")
+	cmd.Flags().StringVar(&image, "image", "", "Docker image reference (e.g. python:3.12, ubuntu:22.04, my-org/my-image:latest)")
 	cmd.Flags().IntVar(&timeout, "timeout", 0, "Timeout in seconds")
 	cmd.Flags().StringArrayVarP(&envVars, "env", "e", nil, "Environment variables (KEY=VALUE)")
 	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "Attach interactive terminal")

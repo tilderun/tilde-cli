@@ -86,6 +86,65 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password reset email
+      description: Always returns 204 regardless of whether the email is registered, to avoid account enumeration.
+      operationId: forgotPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              additionalProperties: false
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '204':
+          description: Request accepted (email sent only if the address belongs to an active password-based account)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Set a new password using a reset token
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              additionalProperties: false
+              properties:
+                token:
+                  type: string
+                  description: The plaintext token delivered by email
+                password:
+                  type: string
+                  format: password
+                  description: The new password (minimum 8 characters)
+      responses:
+        '204':
+          description: Password updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '410':
+          description: Token expired or already used
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /auth/me:
     get:
       tags: [Auth]
@@ -98,7 +157,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [user, organizations]
+                required: [user, organizations, has_password]
                 additionalProperties: false
                 properties:
                   user:
@@ -107,8 +166,194 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/OrgSummary'
+                  has_password:
+                    type: boolean
+                    description: Whether the user currently has a password credential. Use this (not user.source) to decide whether changing the password should require the current one.
         '401':
           $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags: [Auth]
+      summary: Update the current user's editable profile fields
+      operationId: updateCurrentUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                full_name:
+                  type: string
+                bio:
+                  type: string
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Auth]
+      summary: Permanently delete the current user's account
+      operationId: deleteCurrentUser
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                password:
+                  type: string
+                  format: password
+                  description: Required when the account has a password set.
+      responses:
+        '204':
+          description: Account deleted (session cookies cleared)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me/password:
+    put:
+      tags: [Auth]
+      summary: Set or change the current user's password
+      operationId: setCurrentUserPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_password]
+              additionalProperties: false
+              properties:
+                current_password:
+                  type: string
+                  format: password
+                  description: Required when the account already has a password set.
+                new_password:
+                  type: string
+                  format: password
+      responses:
+        '204':
+          description: Password updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me/identities:
+    get:
+      tags: [Auth]
+      summary: List OAuth identities linked to the current user
+      operationId: listCurrentUserIdentities
+      responses:
+        '200':
+          description: Linked identities plus the set of providers enabled on this server
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, enabled_providers]
+                additionalProperties: false
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExternalIdentity'
+                  enabled_providers:
+                    type: array
+                    items:
+                      type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me/identities/{provider}:
+    delete:
+      tags: [Auth]
+      summary: Unlink an OAuth provider from the current user
+      operationId: unlinkCurrentUserIdentity
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Provider unlinked
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Refused because this would leave the account with no way to sign in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/oauth/{provider}/link:
+    get:
+      tags: [Auth]
+      summary: Start an OAuth flow that links the provider identity to the current user
+      operationId: oauthLinkAuthorize
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to the OAuth provider authorization page
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/check-password-strength:
+    post:
+      tags: [Auth]
+      summary: Score a candidate password for strength feedback
+      description: Returns a 0-4 strength score plus warning and suggestions. Used by the registration, password reset, and account settings forms for live feedback.
+      operationId: checkPasswordStrength
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              additionalProperties: false
+              properties:
+                password:
+                  type: string
+                  format: password
+                user_inputs:
+                  type: array
+                  description: Strings (email, username, full name) that the password should not contain.
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Strength evaluation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordStrength'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /auth/check-username:
     get:
@@ -2739,6 +2984,9 @@ paths:
                   type: object
                   additionalProperties:
                     type: string
+                inline_policy:
+                  type: string
+                  description: Optional Tilde policy DSL applied to the agent at creation time. Validated server-side.
       responses:
         '201':
           description: Agent created
@@ -4042,6 +4290,9 @@ components:
           type: string
         company:
           type: string
+        bio:
+          type: string
+          description: Optional user-editable Markdown bio.
         source:
           type: string
         status:
@@ -4051,6 +4302,40 @@ components:
         created_at:
           type: string
           format: date-time
+
+    ExternalIdentity:
+      type: object
+      required: [provider, external_id, created_at]
+      additionalProperties: false
+      properties:
+        provider:
+          type: string
+        external_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    PasswordStrength:
+      type: object
+      required: [score, valid, suggestions]
+      additionalProperties: false
+      properties:
+        score:
+          type: integer
+          minimum: 0
+          maximum: 4
+          description: 0 (worst) to 4 (best). Backend rejects scores below 2.
+        valid:
+          type: boolean
+          description: True when the password meets the minimum acceptable score.
+        warning:
+          type: string
+          description: Short user-facing reason the password was scored low. Empty when score is acceptable.
+        suggestions:
+          type: array
+          items:
+            type: string
 
     APIToken:
       type: object
@@ -4949,7 +5234,7 @@ components:
       properties:
         image:
           type: string
-          description: Image ID from the server-configured allowlist (e.g. "python-312", "ubuntu")
+          description: Docker image reference to run the sandbox from (e.g. "python:3.12", "ubuntu:22.04", "my-org/my-image:latest")
         command:
           type: array
           items:
@@ -4974,7 +5259,7 @@ components:
           description: Environment variables for the container
         run_as:
           type: object
-          description: Run the sandbox as a different principal (agent or role). Not allowed with interactive mode.
+          description: Run the sandbox as a different principal (agent or role).
           properties:
             type:
               type: string
@@ -4991,7 +5276,7 @@ components:
           description: >
             Enable interactive terminal mode. When true, the sandbox allocates a TTY and
             exposes a WebSocket endpoint for bidirectional terminal I/O. The command defaults
-            to /bin/sh if not specified. Cannot be used with run_as.
+            to /bin/sh if not specified.
 
     Sandbox:
       type: object
@@ -5152,7 +5437,7 @@ components:
       properties:
         image:
           type: string
-          description: Image ID from the server-configured allowlist (e.g. "python-312", "ubuntu")
+          description: Docker image reference to run the sandbox from (e.g. "python:3.12", "ubuntu:22.04", "my-org/my-image:latest")
         command:
           type: array
           items:

@@ -51,8 +51,8 @@ api/
 | `tilde sandbox run -r organization/repository --image IMG [-- CMD...]` | Create and run a sandbox |
 | `tilde sandbox logs -r organization/repository SANDBOX_ID` | Stream sandbox output |
 | `tilde sandbox info -r organization/repository SANDBOX_ID` | Show sandbox details |
-| `tilde shell organization/repository [-- CMD...]` | Interactive sandbox (default: busybox:latest) |
-| `tilde exec organization/repository -- CMD...` | Non-interactive sandbox (default: busybox:latest) |
+| `tilde shell organization/repository [-- CMD...]` | Interactive sandbox (default image: ubuntu:22.04) |
+| `tilde exec organization/repository -- CMD...` | Non-interactive sandbox (default image: ubuntu:22.04) |
 | `tilde repository ls [organization]` | List accessible repositories |
 
 ## Environment Variables

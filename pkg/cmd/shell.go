@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultImage = "busybox"
+const defaultImage = "ubuntu:22.04"
 
 func newShellCmd() *cobra.Command {
 	var (
@@ -64,7 +64,7 @@ func newShellCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&image, "image", defaultImage, "Sandbox image (see https://docs.tilde.run)")
+	cmd.Flags().StringVar(&image, "image", defaultImage, "Docker image reference (e.g. python:3.12, ubuntu:22.04, my-org/my-image:latest)")
 	cmd.Flags().StringArrayVarP(&envVars, "env", "e", nil, "Environment variables (KEY=VALUE)")
 	cmd.Flags().StringVar(&timeout, "timeout", "", "Sandbox timeout (e.g. 30s, 5m, 1h)")
 

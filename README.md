@@ -37,18 +37,18 @@ Use `tilde exec` to run a command in a sandbox, stream its output, and exit with
 # Run a command and stream output
 tilde exec organization/repository -- ls -la
 
-# Use a specific container image
-tilde exec organization/repository --image python-3.12 -- python script.py
+# Use a specific Docker image
+tilde exec organization/repository --image python:3.12 -- python script.py
 
 # Pass environment variables and set a timeout
-tilde exec organization/repository --image busybox -e FOO=bar --timeout 5m -- ./script.sh
+tilde exec organization/repository --image ubuntu:22.04 -e FOO=bar --timeout 5m -- ./script.sh
 ```
 
 **Flags:**
 
 | Flag | Description |
 |---|---|
-| `--image` | Container image (default: `busybox:latest`) |
+| `--image` | Docker image reference (default: `ubuntu:22.04`) |
 | `-e, --env` | Environment variable in `KEY=VALUE` format (repeatable) |
 | `--timeout` | Sandbox timeout (`30s`, `5m`, `1h`) |
 
@@ -61,7 +61,7 @@ Use `tilde shell` to get a fully interactive terminal session inside a sandbox:
 tilde shell organization/repository
 
 # Start with a specific image
-tilde shell organization/repository --image python-3.12
+tilde shell organization/repository --image python:3.12
 
 # Run a specific command interactively
 tilde shell organization/repository -- /bin/sh -l
