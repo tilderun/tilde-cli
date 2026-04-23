@@ -2706,7 +2706,15 @@ paths:
   /organizations/{organization}/effective-policies:
     get:
       tags: [Policies]
-      summary: Get effective policies for a principal (direct + inherited from groups)
+      summary: Get effective policies for a principal
+      description: |
+        For users and roles, returns direct attachments and policies inherited
+        from group memberships.
+
+        For agents, returns only the agent's inline policy (if set). Direct
+        attachments and group memberships do not contribute to an agent's
+        permissions: agents are authorized by intersecting their inline
+        policy with the creator's effective policy.
       operationId: getEffectivePolicies
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -5128,7 +5136,11 @@ components:
           type: boolean
         source:
           type: string
-          enum: [direct, group]
+          enum: [direct, group, inline]
+          description: |
+            `direct` = attached directly to the principal (users and roles);
+            `group` = inherited via a group membership (users and roles);
+            `inline` = the agent's inline policy (agents only).
         source_name:
           type: string
           description: Group name when source is "group"
