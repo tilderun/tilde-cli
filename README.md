@@ -14,18 +14,53 @@ Download the latest binary for your platform from the [Releases](https://github.
 go install github.com/tilderun/tilde-cli/cmd/tilde@latest
 ```
 
-## Configuration
+## Authentication
 
-Set your API key to get started:
+### Log in with your browser
+
+The simplest way to authenticate is the device-login flow. It opens a browser, asks you to confirm a one-time code, and stores the resulting token in `~/.tilde/config.yaml` (mode `0600`):
+
+```bash
+tilde auth login
+```
+
+Other auth subcommands:
+
+```bash
+# Show who you're logged in as
+tilde auth status
+
+# Remove stored credentials
+tilde auth logout
+```
+
+### Use an API key directly
+
+If you'd rather not run the login flow (CI, scripts), set an API key in the environment:
 
 ```bash
 export TILDE_API_KEY=tuk-your-key-here
 ```
 
+Keys must start with one of `tuk-`, `trk-`, or `tak-`.
+
+### Inside a Tilde sandbox
+
+When the CLI runs *inside* a Tilde sandbox, it automatically picks up the sandbox's principal — no API key required. The sidecar exposes short-lived credentials via `TILDE_SANDBOX_CREDENTIALS_URI`, and the CLI uses that to mint tokens on demand. This lets you nest sandboxes or call the API from a sandbox without provisioning a separate key.
+
+An explicit API key (CLI flag, env var, or config file) always wins over the sandbox identity, so you can still target a different principal from inside a sandbox.
+
+### Precedence
+
+API key resolution: `--api-key` flag → `TILDE_API_KEY` env var → `~/.tilde/config.yaml` → sandbox metadata (`TILDE_SANDBOX_CREDENTIALS_URI`).
+
+### Environment variables
+
 | Variable | Default | Description |
 |---|---|---|
-| `TILDE_API_KEY` | *(required)* | Your Tilde API key |
+| `TILDE_API_KEY` | *(unset)* | API key. Required unless logged in via `tilde auth login` or running inside a sandbox |
 | `TILDE_ENDPOINT_URL` | `https://tilde.run` | Base URL for the Tilde API |
+| `TILDE_SANDBOX_CREDENTIALS_URI` | *(unset)* | Set by the sandbox runtime; consumed automatically |
 
 ## Quick Start
 
@@ -99,6 +134,9 @@ tilde sandbox logs -f -r organization/repository SANDBOX_ID
 
 # Get sandbox details (status, exit code, timestamps)
 tilde sandbox info -r organization/repository SANDBOX_ID
+
+# Cancel a running sandbox
+tilde sandbox cancel -r organization/repository SANDBOX_ID
 ```
 
 ### List repositories
