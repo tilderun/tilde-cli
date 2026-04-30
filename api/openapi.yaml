@@ -1159,15 +1159,9 @@ paths:
               properties:
                 description:
                   type: string
-                visibility:
-                  type: string
-                  enum: [private, public]
-                session_max_duration_days:
-                  type: integer
-                  description: Maximum number of days a session can remain open before cleanup. Must be less than retention_days.
                 retention_days:
                   type: integer
-                  description: Number of days of commit history to retain. Must be greater than session_max_duration_days.
+                  description: Number of days of commit history to retain.
       responses:
         '200':
           description: Updated repository
@@ -1474,16 +1468,25 @@ paths:
         - $ref: '#/components/parameters/Repository'
         - name: left
           in: query
-          required: true
-          description: Left ref (commit ID)
+          required: false
+          description: Left ref (commit ID). Required unless session_id is provided.
           schema:
             type: string
         - name: right
           in: query
-          required: true
-          description: Right ref (commit ID)
+          required: false
+          description: Right ref (commit ID). Required unless session_id is provided.
           schema:
             type: string
+        - name: session_id
+          in: query
+          required: false
+          description: >
+            Session ID to diff. When provided, the server resolves the appropriate
+            refs automatically and left/right are not required.
+          schema:
+            type: string
+            format: uuid
         - name: prefix
           in: query
           required: false
@@ -1524,12 +1527,10 @@ paths:
   /organizations/{organization}/repositories/{repository}/object:
     get:
       tags: [Objects]
-      summary: Get an object's content
+      summary: Get an object (redirect)
       description: >
-        Supports HTTP Range requests (single ranges only). When a valid Range
-        header is present, the server returns 206 Partial Content with the
-        requested byte range. This enables efficient partial reads of large
-        files such as Parquet.
+        Returns a 307 redirect to a download URL. The client should
+        follow the redirect to download the object.
       operationId: getObject
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -1548,76 +1549,9 @@ paths:
           schema:
             type: string
         - $ref: '#/components/parameters/Path'
-        - name: presign
-          in: query
-          required: false
-          description: If true, return a 307 redirect to a presigned S3 GET URL instead of streaming the object
-          schema:
-            type: boolean
-            default: false
-        - name: Range
-          in: header
-          required: false
-          description: 'HTTP byte range (e.g., "bytes=0-1023"). Only single ranges are supported.'
-          schema:
-            type: string
       responses:
-        '200':
-          description: Full object content (no Range header or Range not satisfiable)
-          headers:
-            ETag:
-              schema:
-                type: string
-            Content-Type:
-              schema:
-                type: string
-            Accept-Ranges:
-              schema:
-                type: string
-                enum: [bytes]
-            Content-Length:
-              schema:
-                type: integer
-                format: int64
-            X-Tilde-Meta-*:
-              description: >
-                User-defined metadata headers. Each key from the object's metadata
-                map is returned as X-Tilde-Meta-<key>.
-              schema:
-                type: string
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        '206':
-          description: Partial content (Range request satisfied)
-          headers:
-            Content-Range:
-              schema:
-                type: string
-                description: 'Byte range delivered, e.g. "bytes 0-1023/49152"'
-            Content-Length:
-              schema:
-                type: integer
-                format: int64
-            ETag:
-              schema:
-                type: string
-            Content-Type:
-              schema:
-                type: string
-            Accept-Ranges:
-              schema:
-                type: string
-                enum: [bytes]
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
         '307':
-          description: Redirect to presigned S3 GET URL (when presign=true)
+          description: Redirect to object download URL
           headers:
             Location:
               schema:
@@ -1628,13 +1562,6 @@ paths:
                 type: string
         '404':
           $ref: '#/components/responses/NotFound'
-        '416':
-          description: Range not satisfiable
-          headers:
-            Content-Range:
-              schema:
-                type: string
-                description: 'Total size, e.g. "bytes */49152"'
     head:
       tags: [Objects]
       summary: Check object existence and metadata
@@ -1686,8 +1613,13 @@ paths:
           $ref: '#/components/responses/NotFound'
     put:
       tags: [Objects]
-      summary: Upload an object
+      summary: Get an upload URL for direct object upload
       operationId: putObject
+      description: >
+        Returns an opaque upload URL and an upload token. The client
+        should upload the object body directly to the upload URL,
+        then call POST /object/finalize with the upload token to complete the
+        upload.
       parameters:
         - $ref: '#/components/parameters/Organization'
         - $ref: '#/components/parameters/Repository'
@@ -1699,26 +1631,19 @@ paths:
             type: string
             format: uuid
         - $ref: '#/components/parameters/Path'
-      description: >
-        Upload an object. Set custom metadata via X-Tilde-Meta-<key> request headers.
-      requestBody:
-        required: true
-        content:
-          application/octet-stream:
-            schema:
-              type: string
-              format: binary
       responses:
-        '201':
-          description: Object uploaded
+        '200':
+          description: Presigned upload URL
           content:
             application/json:
               schema:
                 type: object
+                required: [upload_url, upload_token]
                 properties:
-                  path:
+                  upload_url:
                     type: string
-                  etag:
+                    format: uri
+                  upload_token:
                     type: string
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -1794,50 +1719,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /organizations/{organization}/repositories/{repository}/object/stage:
+  /organizations/{organization}/repositories/{repository}/object/finalize:
     post:
       tags: [Objects]
-      summary: Stage a presigned upload (get an upload URL)
+      summary: Finalize a directly-uploaded object
       description: >
-        Returns a presigned S3 PUT URL, a physical address, and a signature.
-        The client uploads directly to S3 using the upload URL, then calls
-        PUT /object/finalize to record the object in the catalog.
-      operationId: stageObject
-      parameters:
-        - $ref: '#/components/parameters/Organization'
-        - $ref: '#/components/parameters/Repository'
-        - name: session_id
-          in: query
-          required: true
-          description: Session ID to stage the write into
-          schema:
-            type: string
-            format: uuid
-        - $ref: '#/components/parameters/Path'
-      responses:
-        '200':
-          description: Presigned upload details
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StageObjectResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-
-  /organizations/{organization}/repositories/{repository}/object/finalize:
-    put:
-      tags: [Objects]
-      summary: Finalize a presigned upload
-      description: >
-        After uploading to S3 using the URL from POST /object/stage,
-        call this endpoint to verify the upload and record the object
-        in the catalog.
+        After uploading an object directly to S3 via the presigned URL from
+        PUT /object, call this endpoint to complete the upload and make the
+        object visible in the session.
       operationId: finalizeObject
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -1845,50 +1734,57 @@ paths:
         - name: session_id
           in: query
           required: true
-          description: Session ID to stage the write into
+          description: Session ID to stage the object into
           schema:
             type: string
             format: uuid
         - $ref: '#/components/parameters/Path'
-        - name: expires_at
-          in: query
-          required: true
-          description: Expiry timestamp from the stage response (RFC 3339)
-          schema:
-            type: string
-            format: date-time
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/FinalizeObjectRequest'
+              type: object
+              required: [upload_token]
+              properties:
+                upload_token:
+                  type: string
+                checksum:
+                  type: string
+                content_type:
+                  type: string
+                size_bytes:
+                  type: integer
+                  format: int64
+                metadata:
+                  type: object
+                  additionalProperties:
+                    type: string
       responses:
         '201':
-          description: Object finalized
-          headers:
-            Cache-Control:
-              schema:
-                type: string
+          description: Object registered
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FinalizeObjectResponse'
+                type: object
+                properties:
+                  path:
+                    type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/Conflict'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /organizations/{organization}/repositories/{repository}/object/multipart:
     post:
       tags: [Objects]
       summary: Initiate a multipart upload
       description: >
-        Creates a multipart upload in block storage and returns an upload handle
-        with a signed token. The token must be passed to all subsequent multipart
-        operations (part upload, complete, abort).
+        Initiates a multipart upload and returns an opaque upload handle and
+        upload token. Use GET /object/multipart/part to get per-part upload URLs,
+        then POST /object/multipart/complete to finalize.
       operationId: initiateMultipartUpload
       parameters:
         - $ref: '#/components/parameters/Organization'
@@ -1896,90 +1792,100 @@ paths:
         - name: session_id
           in: query
           required: true
-          description: Session ID to stage the write into
+          description: Session ID to stage the upload into
           schema:
             type: string
             format: uuid
         - $ref: '#/components/parameters/Path'
       responses:
-        '201':
+        '200':
           description: Multipart upload initiated
-          headers:
-            Cache-Control:
-              schema:
-                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InitiateMultipartUploadResponse'
+                type: object
+                required: [upload_id, upload_token]
+                properties:
+                  upload_id:
+                    type: string
+                  upload_token:
+                    type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '501':
-          description: Multipart upload not supported by storage backend
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Objects]
+      summary: Abort a multipart upload
+      operationId: abortMultipartUpload
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - $ref: '#/components/parameters/Repository'
+        - name: session_id
+          in: query
+          required: true
+          description: Session ID the upload belongs to
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/Path'
+        - name: upload_id
+          in: query
+          required: true
+          description: Multipart upload ID to abort
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Multipart upload aborted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /organizations/{organization}/repositories/{repository}/object/multipart/part:
     get:
       tags: [Objects]
-      summary: Get a presigned URL for uploading a part
-      description: >
-        Returns a 307 redirect to a presigned S3 URL for uploading a single part.
-        The client should PUT the part data directly to the redirect URL.
+      summary: Get an upload URL for a multipart part
       operationId: getPartPresignedURL
       parameters:
         - $ref: '#/components/parameters/Organization'
         - $ref: '#/components/parameters/Repository'
-        - name: token
-          in: query
-          required: true
-          description: Signed token from the initiate response
-          schema:
-            type: string
         - name: session_id
           in: query
           required: true
+          description: Session ID the upload belongs to
           schema:
             type: string
             format: uuid
-        - name: path
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: physical_address
-          in: query
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/Path'
         - name: upload_id
           in: query
           required: true
+          description: Multipart upload ID
           schema:
             type: string
-        - name: expires_at
-          in: query
-          required: true
-          schema:
-            type: integer
-            format: int64
         - name: part_number
           in: query
           required: true
-          description: Part number (1-based, max 10000)
+          description: Part number (1-based)
           schema:
             type: integer
             minimum: 1
-            maximum: 10000
       responses:
-        '307':
-          description: Redirect to presigned upload URL
-          headers:
-            Location:
-              description: Presigned S3 URL for uploading the part
+        '200':
+          description: Upload URL for this part
+          content:
+            application/json:
               schema:
-                type: string
-                format: uri
+                type: object
+                required: [upload_url]
+                properties:
+                  upload_url:
+                    type: string
+                    format: uri
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -1990,117 +1896,71 @@ paths:
       tags: [Objects]
       summary: Complete a multipart upload
       description: >
-        Completes the multipart upload in S3 and stages the catalog entry
-        in the given session. The total_size is authoritative (from client write tracking).
+        Finalizes a multipart upload. Provide the upload handle, upload token, and
+        list of completed parts (each with part_number and etag from the part upload
+        response). The parts are assembled and the object is registered.
       operationId: completeMultipartUpload
       parameters:
         - $ref: '#/components/parameters/Organization'
         - $ref: '#/components/parameters/Repository'
-        - name: token
-          in: query
-          required: true
-          description: Signed token from the initiate response
-          schema:
-            type: string
         - name: session_id
           in: query
           required: true
+          description: Session ID the upload belongs to
           schema:
             type: string
             format: uuid
-        - name: path
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: physical_address
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: upload_id
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: expires_at
-          in: query
-          required: true
-          schema:
-            type: integer
-            format: int64
+        - $ref: '#/components/parameters/Path'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CompleteMultipartUploadRequest'
+              type: object
+              required: [upload_id, upload_token, parts]
+              properties:
+                upload_id:
+                  type: string
+                upload_token:
+                  type: string
+                checksum:
+                  type: string
+                content_type:
+                  type: string
+                size_bytes:
+                  type: integer
+                  format: int64
+                metadata:
+                  type: object
+                  additionalProperties:
+                    type: string
+                parts:
+                  type: array
+                  items:
+                    type: object
+                    required: [part_number, etag]
+                    properties:
+                      part_number:
+                        type: integer
+                        minimum: 1
+                      etag:
+                        type: string
       responses:
         '201':
-          description: Upload completed and catalog entry staged
-          headers:
-            Cache-Control:
-              schema:
-                type: string
+          description: Multipart upload completed
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CompleteMultipartUploadResponse'
+                type: object
+                properties:
+                  path:
+                    type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-
-  /organizations/{organization}/repositories/{repository}/object/multipart/abort:
-    post:
-      tags: [Objects]
-      summary: Abort a multipart upload
-      description: >
-        Aborts the multipart upload and cleans up any uploaded parts in S3.
-      operationId: abortMultipartUpload
-      parameters:
-        - $ref: '#/components/parameters/Organization'
-        - $ref: '#/components/parameters/Repository'
-        - name: token
-          in: query
-          required: true
-          description: Signed token from the initiate response
-          schema:
-            type: string
-        - name: session_id
-          in: query
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: path
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: physical_address
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: upload_id
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: expires_at
-          in: query
-          required: true
-          schema:
-            type: integer
-            format: int64
-      responses:
-        '204':
-          description: Multipart upload aborted
-        '403':
-          $ref: '#/components/responses/Forbidden'
 
   /organizations/{organization}/repositories/{repository}/objects:
     get:
@@ -4553,16 +4413,9 @@ components:
           type: string
         description:
           type: string
-        visibility:
-          type: string
-          enum: [private, public]
-          default: private
-        session_max_duration_days:
-          type: integer
-          description: Maximum number of days a session can remain open before cleanup (default 7). Must be less than retention_days.
         retention_days:
           type: integer
-          description: Number of days of commit history to retain (default 14). Must be greater than session_max_duration_days.
+          description: Number of days of commit history to retain (default 14).
 
     Repository:
       type: object
@@ -4579,9 +4432,6 @@ components:
           type: string
         visibility:
           type: string
-        session_max_duration_days:
-          type: integer
-          description: Maximum number of days a session can remain open before cleanup
         retention_days:
           type: integer
           description: Number of days of commit history to retain
@@ -4680,8 +4530,6 @@ components:
           description: UUID of the committer principal (empty for pre-migration commits)
         message:
           type: string
-        meta_range_id:
-          type: string
         creation_date:
           type: string
           format: date-time
@@ -4693,14 +4541,6 @@ components:
           type: object
           additionalProperties:
             type: string
-        object_count:
-          type: integer
-          format: int64
-          description: Total number of objects in the committed snapshot
-        total_size:
-          type: integer
-          format: int64
-          description: Total size in bytes of all objects in the committed snapshot
         is_stale:
           type: boolean
           description: Whether this commit is beyond the repository's retention period. Objects from stale commits cannot be listed or read.
@@ -4773,122 +4613,6 @@ components:
           type: string
           format: date-time
         import_job_id:
-          type: string
-
-    # --- Presigned Uploads ---
-    StageObjectResponse:
-      type: object
-      required: [upload_url, physical_address, signature, expires_at]
-      additionalProperties: false
-      properties:
-        upload_url:
-          type: string
-          format: uri
-          description: Presigned S3 PUT URL for direct upload
-        physical_address:
-          type: string
-          description: Physical address of the object in block storage
-        signature:
-          type: string
-          description: HMAC signature to pass to the finalize endpoint
-        expires_at:
-          type: string
-          format: date-time
-          description: When the upload URL and signature expire
-
-    FinalizeObjectRequest:
-      type: object
-      required: [physical_address, signature]
-      additionalProperties: false
-      properties:
-        physical_address:
-          type: string
-          description: Physical address returned by the stage endpoint
-        signature:
-          type: string
-          description: HMAC signature returned by the stage endpoint
-        content_type:
-          type: string
-          description: Content type of the uploaded object (optional)
-        metadata:
-          type: object
-          additionalProperties:
-            type: string
-          description: User-defined metadata key-value pairs to store with the object
-
-    FinalizeObjectResponse:
-      type: object
-      required: [path, etag]
-      additionalProperties: false
-      properties:
-        path:
-          type: string
-        etag:
-          type: string
-
-    InitiateMultipartUploadResponse:
-      type: object
-      required: [upload_id, physical_address, token, expires_at]
-      additionalProperties: false
-      properties:
-        upload_id:
-          type: string
-          description: S3 multipart upload ID
-        physical_address:
-          type: string
-          description: Physical address of the object in block storage
-        token:
-          type: string
-          description: HMAC-signed token binding this upload to a specific context
-        expires_at:
-          type: integer
-          format: int64
-          description: Unix timestamp when the token expires
-
-    CompleteMultipartUploadRequest:
-      type: object
-      required: [parts, total_size]
-      additionalProperties: false
-      properties:
-        parts:
-          type: array
-          items:
-            $ref: '#/components/schemas/CompletedPart'
-          minItems: 1
-          description: List of completed parts with their part numbers and ETags
-        content_type:
-          type: string
-          description: Content type of the uploaded object (defaults to application/octet-stream)
-        total_size:
-          type: integer
-          format: int64
-          description: Total size in bytes (authoritative, from client write tracking)
-        metadata:
-          type: object
-          additionalProperties:
-            type: string
-          description: User-defined metadata key-value pairs to store with the object
-
-    CompletedPart:
-      type: object
-      required: [part_number, etag]
-      additionalProperties: false
-      properties:
-        part_number:
-          type: integer
-          minimum: 1
-          maximum: 10000
-        etag:
-          type: string
-
-    CompleteMultipartUploadResponse:
-      type: object
-      required: [path, etag]
-      additionalProperties: false
-      properties:
-        path:
-          type: string
-        etag:
           type: string
 
     DeleteObjectsRequest:
