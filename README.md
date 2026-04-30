@@ -4,6 +4,14 @@ A command-line interface for running sandboxed commands on the [Tilde](https://t
 
 ## Installation
 
+### One-liner (macOS & Linux)
+
+```bash
+curl -fsSL https://tilde.run/install | sh
+```
+
+The installer downloads the latest CLI binary to `~/.tilde/bin/`, adds it to your shell `PATH` (with your confirmation), and opens your browser to authenticate.
+
 ### From release binaries
 
 Download the latest binary for your platform from the [Releases](https://github.com/tilderun/tilde-cli/releases) page.
@@ -36,13 +44,13 @@ tilde auth logout
 
 ### Use an API key directly
 
-If you'd rather not run the login flow (CI, scripts), set an API key in the environment:
+You can also authenticate by setting an API key in the environment:
 
 ```bash
 export TILDE_API_KEY=tuk-your-key-here
 ```
 
-Keys must start with one of `tuk-`, `trk-`, or `tak-`.
+Keys must start with one of `tuk-`, `trk-`, or `tak-`. `TILDE_API_KEY` takes precedence over the saved interactive credentials, so setting it temporarily won't disturb a `tilde auth login` session.
 
 ### Inside a Tilde sandbox
 
@@ -121,9 +129,22 @@ tilde sandbox run -r organization/repository --image alpine -d -- echo hello
 tilde sandbox run -r organization/repository --image alpine -i -- /bin/sh
 ```
 
-Additional flags: `-d` (detach), `-i` (interactive), `--mountpoint`, `--path-prefix`.
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `-r, --repository` | Repository in `organization/repository` format (required) |
+| `--image` | Docker image reference, e.g. `python:3.12` (required) |
+| `-e, --env` | Environment variable in `KEY=VALUE` format (repeatable) |
+| `--timeout` | Sandbox timeout in seconds |
+| `-d, --detach` | Print the sandbox ID and exit immediately |
+| `-i, --interactive` | Attach an interactive terminal to the sandbox |
+| `--mountpoint` | Mount point for repository data |
+| `--path-prefix` | Path prefix for repository data |
 
 ### Sandbox management
+
+All sandbox management subcommands require `-r/--repository`.
 
 ```bash
 # View sandbox logs
@@ -141,9 +162,68 @@ tilde sandbox cancel -r organization/repository SANDBOX_ID
 
 ### List repositories
 
+List all repositories accessible to the authenticated user. Optionally filter by organization.
+
 ```bash
+# All repositories
 tilde repository ls
+
+# Repositories in a specific organization
 tilde repository ls my-organization
+```
+
+Output is one repository per line:
+
+```
+my-team/my-data
+my-team/models
+other-org/shared-data
+```
+
+## Examples
+
+### Run a Python script with dependencies
+
+```bash
+tilde exec my-team/my-repo --image python:3.12 -- \
+  bash -c "pip install pandas && python /sandbox/analyze.py"
+```
+
+### Run a detached job and check on it later
+
+```bash
+# Start the sandbox in detached mode
+SANDBOX_ID=$(tilde sandbox run -r my-team/my-repo --image alpine -d -- sleep 300)
+
+# Check its status
+tilde sandbox info -r my-team/my-repo $SANDBOX_ID
+
+# Follow its logs
+tilde sandbox logs -r my-team/my-repo -f $SANDBOX_ID
+
+# Cancel it early if needed
+tilde sandbox cancel -r my-team/my-repo $SANDBOX_ID
+```
+
+### Pass secrets via environment variables
+
+```bash
+tilde exec my-team/my-repo \
+  --image alpine:3.19 \
+  -e DATABASE_URL="$DATABASE_URL" \
+  -e API_TOKEN="$API_TOKEN" \
+  --timeout 10m \
+  -- ./scripts/migrate.sh
+```
+
+### Nest a sandbox from inside another sandbox
+
+Inside a Tilde sandbox the CLI authenticates automatically via the sandbox's principal, so you can launch nested workloads with no extra setup:
+
+```bash
+tilde shell my-team/my-repo -- bash -c '
+  tilde exec my-team/other-repo --image python:3.12 -- python child.py
+'
 ```
 
 ## License
