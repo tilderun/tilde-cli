@@ -173,8 +173,8 @@ func TestSandboxStatusHelpers(t *testing.T) {
 	}{
 		{SandboxStatusStarting, false, false, false},
 		{SandboxStatusRunning, false, true, true},
-		{SandboxStatusCommitted, true, false, true},
-		{SandboxStatusAwaitingApproval, true, false, true},
+		{SandboxStatusDone, true, false, true},
+		{SandboxStatusErrored, true, false, true},
 		{SandboxStatusFailed, true, false, true},
 		{SandboxStatusCancelled, true, false, true},
 		{"", false, false, false},

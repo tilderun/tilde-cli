@@ -1837,6 +1837,12 @@ paths:
           description: Multipart upload ID to abort
           schema:
             type: string
+        - name: upload_token
+          in: query
+          required: true
+          description: Upload token returned from initiateMultipartUpload
+          schema:
+            type: string
       responses:
         '204':
           description: Multipart upload aborted
@@ -1865,6 +1871,12 @@ paths:
           in: query
           required: true
           description: Multipart upload ID
+          schema:
+            type: string
+        - name: upload_token
+          in: query
+          required: true
+          description: Upload token returned from initiateMultipartUpload
           schema:
             type: string
         - name: part_number
@@ -3139,6 +3151,160 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /connectors/oauth/google_drive/authorize:
+    get:
+      tags: [Connectors]
+      summary: Start Google Drive connector OAuth flow
+      description: >
+        Redirects the browser to Google's OAuth consent screen. The caller
+        must be authenticated and have permission to create connectors in
+        the target organization. Sets an HttpOnly state cookie used by the
+        callback.
+      operationId: authorizeDriveOAuth
+      parameters:
+        - in: query
+          name: org_slug
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to Google's OAuth authorization endpoint
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          description: Google Drive connector is disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /connectors/oauth/google_drive/callback:
+    get:
+      tags: [Connectors]
+      summary: Google Drive connector OAuth callback
+      description: >
+        Google redirects here after consent. The handler exchanges the
+        authorization code for tokens, issues an HttpOnly claim cookie
+        carrying the encrypted refresh token, and redirects to the SPA
+        setup page. If Google does not return a refresh token (e.g. the
+        user previously approved the app), the user is redirected to the
+        setup page with `?error=no_refresh_token` so they can revoke and
+        retry.
+      operationId: driveOAuthCallback
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: state
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to the frontend setup page
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          description: Token exchange failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /organizations/{organization}/connectors/google_drive/list_drives:
+    post:
+      tags: [Connectors]
+      summary: List Google Drives available to the authenticated Drive account
+      description: >
+        Used by the SPA setup page to render a drive picker. Authenticated
+        via the OAuth claim cookie issued by the callback plus the
+        `X-Drive-Claim-Nonce` header (double-submit protection).
+      operationId: listDriveCandidates
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - in: header
+          name: X-Drive-Claim-Nonce
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Available drives
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListDriveCandidatesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          description: Drive API call failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Google Drive connector is disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /organizations/{organization}/connectors/google_drive/list_children:
+    post:
+      tags: [Connectors]
+      summary: List immediate sub-folders of a Drive folder
+      description: >
+        Used by the SPA setup page to render a lazy-loaded folder picker.
+        Authenticated via the OAuth claim cookie plus
+        `X-Drive-Claim-Nonce` header.
+      operationId: listDriveChildren
+      parameters:
+        - $ref: '#/components/parameters/Organization'
+        - in: header
+          name: X-Drive-Claim-Nonce
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListDriveChildrenRequest'
+      responses:
+        '200':
+          description: Sub-folders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListDriveChildrenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          description: Drive API call failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Google Drive connector is disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /organizations/{organization}/connectors/{connector_id}/test:
     post:
       tags: [Connectors]
@@ -4366,6 +4532,12 @@ components:
           type: string
         display_name:
           type: string
+        status:
+          type: string
+          enum: [active, suspended]
+        notes:
+          type: string
+          nullable: true
         created_at:
           type: string
           format: date-time
@@ -4574,8 +4746,6 @@ components:
     Entry:
       type: object
       properties:
-        address:
-          type: string
         last_modified:
           type: string
           format: date-time
@@ -4588,9 +4758,6 @@ components:
           type: object
           additionalProperties:
             type: string
-        address_type:
-          type: integer
-          description: '1=relative (uploaded), 2=full (imported)'
         content_type:
           type: string
         source_metadata:
@@ -4898,13 +5065,20 @@ components:
           type: string
         type:
           type: string
-          enum: [s3, gcs, git]
+          enum: [s3, gcs, git, google_drive]
         source_uri:
           type: string
-          description: 'Source URI (e.g., s3://bucket/prefix/ or gs://bucket/prefix/)'
+          description: >
+            Source URI for the connector. Examples: `s3://bucket/prefix/`,
+            `gs://bucket/prefix/`, or `googledrive://{drive_id}/{folder_id}/`
+            where `drive_id` is `my-drive` or a Shared Drive id.
         config:
           type: object
-          description: Connector-specific config (e.g., S3 credentials)
+          description: >
+            Connector-specific config. For `google_drive`, supply only
+            `{drive_id, folder_id?, folder_label?}`; the refresh token is
+            resolved server-side from the OAuth claim cookie issued by the
+            Google Drive OAuth callback and never appears in this payload.
 
     ConnectorInfo:
       type: object
@@ -4918,6 +5092,14 @@ components:
           type: string
         source_uri:
           type: string
+        display_source:
+          type: string
+          description: >-
+            Human-readable rendering of `source_uri`. For most connector
+            types this equals `source_uri`. For `google_drive` it is the
+            captured folder path (e.g. `MyDrive/Sales/Q3`) so the UI can
+            avoid showing opaque drive/folder ids. Falls back to
+            `source_uri` for legacy connectors without a captured label.
         disabled:
           type: boolean
         public_key:
@@ -4936,7 +5118,7 @@ components:
       properties:
         type:
           type: string
-          enum: [s3, gcs, git]
+          enum: [s3, gcs, git, google_drive]
         source_uri:
           type: string
         config:
@@ -4949,6 +5131,57 @@ components:
         status:
           type: string
           enum: [ok]
+
+    DriveCandidate:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          description: >
+            `my-drive` for the user's My Drive, otherwise the Shared Drive id.
+        name:
+          type: string
+
+    ListDriveCandidatesResponse:
+      type: object
+      required: [drives]
+      properties:
+        drives:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriveCandidate'
+
+    DriveFolder:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+
+    ListDriveChildrenRequest:
+      type: object
+      required: [drive_id]
+      properties:
+        drive_id:
+          type: string
+          description: '`my-drive` or a Shared Drive id.'
+        folder_id:
+          type: string
+          description: >
+            Optional folder id whose direct children should be listed.
+            Empty means the drive root.
+
+    ListDriveChildrenResponse:
+      type: object
+      required: [folders]
+      properties:
+        folders:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriveFolder'
 
     # --- Import ---
     StartImportRequest:
@@ -5132,7 +5365,7 @@ components:
             type: string
         status:
           type: string
-          enum: [starting, running, committed, awaiting_approval, failed, cancelled]
+          enum: [starting, running, done, errored, failed, cancelled]
         status_reason:
           type: string
         error_message:
@@ -5170,25 +5403,38 @@ components:
       properties:
         status:
           type: string
-          enum: [starting, running, committed, awaiting_approval, failed, cancelled]
+          enum: [starting, running, done, errored, failed, cancelled]
           description: |
-            Public sandbox lifecycle state. Values are stable.
+            Public sandbox lifecycle state. Values are stable. The
+            `(status, status_reason)` pair describes the full outcome --
+            read both.
 
             * `starting` - sandbox is being prepared; wait, do not attach.
-            * `running` - sandbox is ready; you may attach its terminal and/or stream its logs.
-            * `committed` - finished, changes committed; disconnect and read `commit_id`.
-            * `awaiting_approval` - finished but the session requires human approval before
-              changes can land; disconnect and surface `web_url`.
-            * `failed` - sandbox errored; disconnect and read `error_message`.
+              `status_reason` is `created` (row inserted) or `initializing`
+              (orchestrator is bringing the pod up).
+            * `running` - sandbox is ready; you may attach its terminal
+              and/or stream its logs. `status_reason` is empty.
+            * `done` - sandbox finished its job. `status_reason` is
+              `committed` (changes landed; read `commit_id`),
+              `no_changes` (nothing to commit) or `awaiting_approval`
+              (changes pending a human approval; surface `web_url`).
+            * `errored` - the user's command exited non-zero; read
+              `exit_code`. `status_reason` is `exit_non_zero`.
+            * `failed` - tilde-side infrastructure failure; read
+              `error_message`. `status_reason` narrows the cause
+              (`internal_error`, `image_not_found`, `sandbox_lost`,
+              `timeout`, `commit_failed`, `policy_violation`,
+              `storage_not_ready`).
             * `cancelled` - cancelled by a user or operator; disconnect.
+              `status_reason` is `cancelled_by_user` or
+              `user_initiated_cancel`.
 
-            The first two are active; the last four are terminal.
+            `starting` and `running` are active; the other four are terminal.
         status_reason:
           type: string
           description: |
-            Stable machine-readable qualifier for the current status. Values include
-            `internal_error`, `exit_nonzero`, `commit_failed`, `approval_required`,
-            `policy_violation`, `cancelled_by_user`, `cancel_requested`, `timeout`, `no_changes`.
+            Stable machine-readable qualifier for the current status.
+            See the `status` description for the allowed reasons per status.
         exit_code:
           type: integer
           nullable: true
@@ -5198,7 +5444,9 @@ components:
           type: string
         error_message:
           type: string
-          description: Present when `status` is `failed`; human-readable sandbox-level reason.
+          description: |
+            Present when `status` is `failed` or `errored`; human-readable
+            outcome description.
 
     PutSecretRequest:
       type: object

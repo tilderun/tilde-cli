@@ -74,13 +74,39 @@ type SandboxStatusResponse struct {
 }
 
 // Sandbox lifecycle states. Mirrors the enum in the server OpenAPI spec.
+// The (Status, StatusReason) pair describes the full outcome -- read both.
 const (
-	SandboxStatusStarting         = "starting"
-	SandboxStatusRunning          = "running"
-	SandboxStatusCommitted        = "committed"
-	SandboxStatusAwaitingApproval = "awaiting_approval"
-	SandboxStatusFailed           = "failed"
-	SandboxStatusCancelled        = "cancelled"
+	SandboxStatusStarting  = "starting"
+	SandboxStatusRunning   = "running"
+	SandboxStatusDone      = "done"
+	SandboxStatusErrored   = "errored"
+	SandboxStatusFailed    = "failed"
+	SandboxStatusCancelled = "cancelled"
+)
+
+// Sandbox status reasons. Stable machine-readable qualifiers for the
+// current status. See the OpenAPI spec for the allowed reasons per status.
+const (
+	// starting
+	SandboxReasonCreated      = "created"
+	SandboxReasonInitializing = "initializing"
+	// done
+	SandboxReasonCommitted        = "committed"
+	SandboxReasonNoChanges        = "no_changes"
+	SandboxReasonAwaitingApproval = "awaiting_approval"
+	// errored
+	SandboxReasonExitNonZero = "exit_non_zero"
+	// failed
+	SandboxReasonInternalError    = "internal_error"
+	SandboxReasonImageNotFound    = "image_not_found"
+	SandboxReasonSandboxLost      = "sandbox_lost"
+	SandboxReasonTimeout          = "timeout"
+	SandboxReasonCommitFailed     = "commit_failed"
+	SandboxReasonPolicyViolation  = "policy_violation"
+	SandboxReasonStorageNotReady  = "storage_not_ready"
+	// cancelled
+	SandboxReasonCancelledByUser     = "cancelled_by_user"
+	SandboxReasonUserInitiatedCancel = "user_initiated_cancel"
 )
 
 // Sandbox execution modes. Mirrors the enum in the server OpenAPI spec.
@@ -94,7 +120,7 @@ const (
 // it will not transition out of.
 func (s *SandboxStatusResponse) IsTerminal() bool {
 	switch s.Status {
-	case SandboxStatusCommitted, SandboxStatusAwaitingApproval, SandboxStatusFailed, SandboxStatusCancelled:
+	case SandboxStatusDone, SandboxStatusErrored, SandboxStatusFailed, SandboxStatusCancelled:
 		return true
 	}
 	return false

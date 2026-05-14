@@ -266,6 +266,12 @@ func nextBackoff(d time.Duration) time.Duration {
 
 // waitForFinalStatus polls until the sandbox reaches a terminal state and
 // prints the outcome (commit ID, approval URL, failure reason, etc.).
+//
+// The server reports the final outcome as a (status, status_reason) pair:
+// `done` covers successful completion (committed, no_changes, or
+// awaiting_approval), `errored` is a non-zero exit from the user's command,
+// `failed` is an infrastructure-side failure, and `cancelled` is operator-
+// or user-initiated cancellation.
 func waitForFinalStatus(ctx context.Context, org, repo, sandboxID string) error {
 	for {
 		status, err := apiClient.GetSandboxStatus(ctx, org, repo, sandboxID)
@@ -273,30 +279,43 @@ func waitForFinalStatus(ctx context.Context, org, repo, sandboxID string) error 
 			return fmt.Errorf("getting sandbox status: %w", err)
 		}
 		switch status.Status {
-		case api.SandboxStatusCommitted:
-			if status.CommitID != "" {
-				fmt.Fprintf(os.Stderr, "Committed: %s\n", status.CommitID)
-			} else if status.StatusReason == "no_changes" {
+		case api.SandboxStatusDone:
+			switch status.StatusReason {
+			case api.SandboxReasonCommitted:
+				if status.CommitID != "" {
+					fmt.Fprintf(os.Stderr, "Committed: %s\n", status.CommitID)
+				} else {
+					fmt.Fprintln(os.Stderr, "Committed")
+				}
+			case api.SandboxReasonNoChanges:
 				fmt.Fprintln(os.Stderr, "Done (no changes)")
+			case api.SandboxReasonAwaitingApproval:
+				fmt.Fprintln(os.Stderr, "Commit requires approval")
+				if status.WebURL != "" {
+					fmt.Fprintf(os.Stderr, "Approve at: %s\n", status.WebURL)
+				}
+			default:
+				fmt.Fprintln(os.Stderr, "Done")
 			}
 			if status.ExitCode != nil {
 				os.Exit(*status.ExitCode)
 			}
 			return nil
-		case api.SandboxStatusAwaitingApproval:
-			fmt.Fprintln(os.Stderr, "Commit requires approval")
-			if status.WebURL != "" {
-				fmt.Fprintf(os.Stderr, "Approve at: %s\n", status.WebURL)
+		case api.SandboxStatusErrored:
+			if status.ErrorMessage != "" {
+				fmt.Fprintf(os.Stderr, "Errored: %s\n", status.ErrorMessage)
 			}
 			if status.ExitCode != nil {
 				os.Exit(*status.ExitCode)
 			}
-			return nil
+			os.Exit(1)
 		case api.SandboxStatusFailed:
 			if status.ErrorMessage != "" {
 				fmt.Fprintf(os.Stderr, "Failed: %s\n", status.ErrorMessage)
 			} else if status.StatusReason != "" {
 				fmt.Fprintf(os.Stderr, "Failed: %s\n", status.StatusReason)
+			} else {
+				fmt.Fprintln(os.Stderr, "Failed")
 			}
 			if status.ExitCode != nil {
 				os.Exit(*status.ExitCode)

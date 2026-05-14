@@ -65,7 +65,7 @@ func TestSandboxLogs_TerminalStateReadsSnapshot(t *testing.T) {
 	setupTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/status"):
-			_ = json.NewEncoder(w).Encode(api.SandboxStatusResponse{Status: api.SandboxStatusCommitted})
+			_ = json.NewEncoder(w).Encode(api.SandboxStatusResponse{Status: api.SandboxStatusDone, StatusReason: api.SandboxReasonCommitted})
 		case strings.HasSuffix(r.URL.Path, "/logs/stdout"):
 			w.Write([]byte("final output\n"))
 		default:
